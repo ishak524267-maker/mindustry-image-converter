@@ -1,6 +1,6 @@
 # Mindcode Image Converter — Полная документация проекта
 
-> Инструмент для конвертации растровых изображений в код Mindcode и ассемблер MLOG для логических процессоров Mindustry (release build **160.7**).
+> Комплексный инструмент для конвертации растровых изображений в код Mindcode, ассемблер MLOG и готовые схемы `.msch` для логических процессоров Mindustry (release build **160.7**).
 
 ---
 
@@ -17,36 +17,43 @@
 5. [Классы и API](#5-классы-и-api)
    - [DisplayConfig](#51-displayconfig)
    - [Rect](#52-rect)
-   - [ConversionResult](#53-conversionresult)
-   - [ImageProcessor](#54-imageprocessor)
-   - [GreedyMesher](#55-greedymesher)
-   - [CodeCompiler](#56-codecompiler)
-   - [ConverterService](#57-converterservice)
-   - [GUI: ModernButton](#58-gui-modernbutton)
-   - [GUI: SegmentedControl](#59-gui-segmentedcontrol)
-   - [GUI: ScrollableRow](#510-gui-scrollablerow)
-   - [GUI: AppGUI](#511-gui-appgui)
+   - [ProcessorCode](#53-processorcode)
+   - [ConversionResult](#54-conversionresult)
+   - [ImageProcessor](#55-imageprocessor)
+   - [GreedyMesher](#56-greedymesher)
+   - [CodeCompiler](#57-codecompiler)
+   - [ConverterService](#58-converterservice)
+   - [schematic_builder (API и компоновка)](#59-schematic_builder-api-и-компоновка)
+   - [GUI: ModernButton](#510-gui-modernbutton)
+   - [GUI: SegmentedControl](#511-gui-segmentedcontrol)
+   - [GUI: AppGUI](#512-gui-appgui)
 6. [Конвейер обработки изображения](#6-конвейер-обработки-изображения)
-7. [Технические ограничения Mindustry 160.7](#7-технические-ограничения-mindustry-160-7)
-8. [Формат выходных файлов](#8-формат-выходных-файлов)
-9. [Документация в папке `doc/`](#9-документация-в-папке-doc)
-10. [Зависимости](#10-зависимости)
+7. [Технические особенности и логика Mindustry 160.7](#7-технические-особенности-и-логика-mindustry-1607)
+8. [Форматы выходных данных](#8-форматы-выходных-данных)
+   - [.mnd — исходный код Mindcode](#81-mnd--исходный-код-mindcode)
+   - [.mlog — ассемблер Mindustry Logic](#82-mlog--ассемблер-mindustry-logic)
+   - [.msch и Base64 — схема Mindustry](#83-msch-и-base64--схема-mindustry)
+9. [Зависимости и системные требования](#9-зависимости-и-системные-требования)
 
 ---
 
 ## 1. Обзор проекта
 
-**Mindcode Image Converter** — утилита на Python, которая:
+**Mindcode Image Converter** — приложение на Python, предназначенное для переноса растровой графики на логические экраны в стратегии **Mindustry**:
 
-- Принимает растровое изображение (PNG, JPG, BMP, WEBP, GIF).
-- Масштабирует его под разрешение логического дисплея Mindustry.
-- Квантует цвета (от 2 до 64 цветов).
-- Объединяет соседние пиксели одного цвета в прямоугольники (алгоритм 2D Greedy Meshing).
-- Генерирует код на языке **Mindcode** (`.mnd`) — читаемый, структурированный исходник.
-- Генерирует готовый ассемблер **MLOG** (`.mlog`) — для прямой вставки в процессор через `Ctrl+V`.
-
-Интерфейс:
-- **GUI** — современный графический интерфейс на Tkinter с интерактивным предпросмотром в реальном времени, настройкой палитры, адаптивным сжатием под лимит процессора, нарезкой на процессоры и генерацией готовых схем Mindustry (`.msch` / Base64).
+* **Обработка графики**: масштабирование изображений (режимы Fit, Fill, Stretch), квантование палитры методом Median Cut (2–32 цвета), опциональный дизеринг Floyd-Steinberg.
+* **Оптимизация примитивов (2D Greedy Meshing)**: объединение соседних пикселей одинакового цвета в максимальные по площади прямоугольники. В сочетании с однократной заливкой фонового цвета через `clear` это сокращает количество отрисовочных инструкций в 5–30 раз.
+* **Генерация кода для логических процессоров Mindustry**:
+  * **Mindcode (`.mnd`)**: структурированный высокоуровневый код с прагмами минимизации размера (`#set goal = size`).
+  * **MLOG (`.mlog`)**: готовый к вставке в игровой процессор ассемблерный код (`draw clear`, `draw color`, `draw rect`, `drawflush`, `stop`, `wait`).
+* **Мульти-процессорная нарезка (Multi-Processor Splitting)**:
+  * Обход жесткого лимита парсера Mindustry в **1000 строк** на процессор.
+  * Разделение графических команд на серию процессоров (по ≤950 инструкций).
+  * Корректная рассинхронизация (`wait`), сохранение независимости цвета между пачками `drawflush` и финальная остановка (`stop`).
+* **Генерация схем Mindustry (`.msch` / Base64)**:
+  * Автоматическая сборка схемы с дисплеем и необходимым количеством процессоров вокруг него.
+  * Линковка процессоров к дисплею (`ProcessorLink`) с предзагруженным MLOG-кодом.
+  * Копирование схемы в Base64 для прямой вставки в игре через буфер обмена (`Ctrl+V`).
 
 ---
 
@@ -55,19 +62,13 @@
 ```
 mindustry/
 │
-├── main.py                     # Главная точка входа: запуск GUI
-├── converter.py                # Ядро: ImageProcessor, GreedyMesher, CodeCompiler, ConverterService
-├── schematic_builder.py        # Сборщик схем (.msch / Base64) с дисплеем и процессорами
-├── gui.py                      # Графический интерфейс (Tkinter)
+├── main.py              # Точка входа: инициализация и запуск GUI
+├── converter.py         # Ядро: обработка изображений, Greedy Meshing, компилятор Mindcode/MLOG
+├── schematic_builder.py # Сборщик .msch-схем Mindustry и экспорт в Base64 (pymsch)
+├── gui.py               # Графический интерфейс на Tkinter (Modern Dark UI)
 │
-├── DOCUMENTATION.md            # Этот файл — полная документация
-│
-├── doc/
-│   ├── MINDCODE_DOCUMENTATION.md   # Официальная документация языка Mindcode
-│   ├── MINDUSTRY_GUIDE.md          # Руководство по Mindustry Logic и дисплеям
-│   └── rule.md                     # Правило: когда писать Mindcode, а когда mlog
-│
-└── __pycache__/                # Кэш байт-кода Python (автогенерация)
+├── DOCUMENTATION.md     # Полная документация проекта
+└── .gitignore           # Исключения git (__pycache__, кэш ruff)
 ```
 
 ---
@@ -76,11 +77,13 @@ mindustry/
 
 ### Графический интерфейс (GUI)
 
+Запуск через главную точку входа:
+
 ```bash
 python main.py
 ```
 
-или напрямую:
+или напрямую через модуль интерфейса:
 
 ```bash
 python gui.py
@@ -92,7 +95,7 @@ python gui.py
 
 ### 4.1 `main.py`
 
-**Точка входа программы.** Запускает графический интерфейс `gui.main()`.
+Минимальная точка входа программы. Запускает графический интерфейс приложения.
 
 ```python
 import gui
@@ -110,50 +113,41 @@ if __name__ == "__main__":
 
 ### 4.2 `converter.py`
 
-**Ядро программы.** Содержит все алгоритмы обработки изображений и генерации кода.
+Ядро программы. Содержит структуры данных, алгоритмы обработки графики и компиляторы кода для внутриигровой виртуальной машины.
 
-Импортируемые модули: `dataclasses`, `typing`, `subprocess`, `os`, `tempfile`, `PIL.Image`.
-
-**Экспортируемые имена:** `DisplayConfig`, `DISPLAYS`, `Rect`, `ProcessorCode`, `ConversionResult`, `ImageProcessor`, `GreedyMesher`, `CodeCompiler`, `ConverterService`.
-
-**Константа `DISPLAYS`** — словарь поддерживаемых дисплеев:
-
-| Ключ | Имя | Разрешение |
-|------|-----|-----------|
-| `"small"` | Logic Display | 80 × 80 |
-| `"large"` | Large Logic Display | 176 × 176 |
+* **Импортируемые модули**: `os`, `subprocess`, `tempfile`, `dataclasses`, `PIL.Image`.
+* **Экспортируемые сущности**:
+  * Датаклассы: `DisplayConfig`, `Rect`, `ProcessorCode`, `ConversionResult`.
+  * Словарь дисплеев: `DISPLAYS`.
+  * Классы обработки: `ImageProcessor`, `GreedyMesher`, `CodeCompiler`, `ConverterService`.
 
 ---
 
 ### 4.3 `schematic_builder.py`
 
-**Сборщик схем Mindustry.** Принимает результат конвертации (`ConversionResult`) и собирает готовую `.msch`-схему с размещением дисплея и процессоров по периметру, содержащих готовый MLOG-код. Слинковывает процессоры с дисплеем. Поддерживает копирование схемы в Base64 прямо в буфер обмена для импорта в игру через `Ctrl+V`.
+Сборщик игровых схем Mindustry на базе библиотеки `pymsch`.
 
-Использует библиотеку `pymsch`.
+* Принимает `ConversionResult` от `ConverterService`.
+* Размещает центральный дисплей (3×3 для Logic Display или 6×6 для Large Logic Display).
+* Расставляет необходимое количество процессоров `LOGIC_PROCESSOR` (2×2) по 4 сторонам дисплея (право, верх, лево, низ, а при необходимости — дополнительными колонками справа) без коллизий блоков.
+* Линкует каждый процессор к целевому экрану через относительные координаты вектора связи `ProcessorLink(dx, dy, name)`.
+* Встраивает MLOG-код внутрь конфигурации каждого процессора.
+* Выводит результат в виде Base64-строки для буфера обмена и бинарных данных `.msch` для сохранения файла.
 
 ---
 
 ### 4.4 `gui.py`
 
-**Графический интерфейс** на базе `tkinter`. Импортирует `PIL.Image`, `PIL.ImageTk`, `ConverterService`, `ConversionResult`, `DISPLAYS`.
+Графический интерфейс приложения на чистом `tkinter` с использованием `PIL.ImageTk`.
 
-**Цветовая схема (Modern Dark):**
-
-| Константа | HEX | Назначение |
-|-----------|-----|-----------|
-| `C_BG_ROOT` | `#0f0f12` | Фон окна |
-| `C_BG_CARD` | `#18181c` | Фон карточек |
-| `C_BG_INPUT` | `#222228` | Фон полей ввода |
-| `C_ACCENT_BLUE` | `#3b82f6` | Акцентный синий |
-| `C_ACCENT_GREEN` | `#10b981` | Акцентный зелёный |
-
-**Компоненты GUI:**
-- `ModernButton` — кнопка с hover-эффектом.
-- `SegmentedControl` — переключатель между несколькими вариантами.
-- `ScrollableRow` — горизонтально прокручиваемый ряд (список процессоров).
-- `AppGUI` — главное окно приложения (размер 1200×780, минимум 1000×660).
-
-**Функция `main()`** — создаёт и запускает `AppGUI`.
+* Реализован в палитре **Modern Dark**:
+  * `C_BG_ROOT` (`#0f0f12`), `C_BG_CARD` (`#18181c`), `C_BG_INPUT` (`#222228`), `C_BORDER` (`#2b2b32`).
+  * Акцентные цвета: синий (`#3b82f6`), зеленый (`#10b981`), оранжевый (`#f59e0b`), фиолетовый (`#c084fc`).
+* Поддерживает работу с 4 вкладками:
+  1. **Предпросмотр**: синхронное отображение исходного изображения и пиксельного вида экрана в игре.
+  2. **MLOG (в процессор)**: просмотр готового ассемблера как для отдельных процессоров, так и единым файлом.
+  3. **Mindcode (.mnd)**: просмотр структурированного исходника Mindcode.
+  4. **Схема (.msch)**: Base64-код и сводка по сгенерированной схеме.
 
 ---
 
@@ -161,70 +155,92 @@ if __name__ == "__main__":
 
 ### 5.1 `DisplayConfig`
 
-Датакласс. Описывает тип дисплея Mindustry.
+Датакласс описания логического экрана Mindustry.
 
-| Поле | Тип | Описание |
-|------|-----|---------|
-| `name` | `str` | Отображаемое имя дисплея |
-| `width` | `int` | Ширина в пикселях |
-| `height` | `int` | Высота в пикселях |
+```python
+@dataclass
+class DisplayConfig:
+    name: str
+    width: int
+    height: int
+```
+
+Константа `DISPLAYS`:
+```python
+DISPLAYS = {
+    "small": DisplayConfig("Logic Display", 80, 80),
+    "large": DisplayConfig("Large Logic Display", 176, 176),
+}
+```
 
 ---
 
 ### 5.2 `Rect`
 
-Датакласс. Один отрисовываемый прямоугольник после Greedy Meshing.
+Датакласс отрисовываемого графического примитива (прямоугольника), полученного после Greedy Meshing.
 
-| Поле | Тип | Описание |
-|------|-----|---------|
-| `x` | `int` | X-координата (в системе Mindustry, Y=0 снизу) |
-| `y` | `int` | Y-координата (инвертировано) |
-| `w` | `int` | Ширина в пикселях дисплея |
-| `h` | `int` | Высота в пикселях дисплея |
-| `color_hex` | `str` | Цвет в HEX (`RRGGBB`, без `#`) |
-| `color_rgb` | `Tuple[int,int,int]` | Цвет в RGB |
+```python
+@dataclass
+class Rect:
+    x: int
+    y: int
+    w: int
+    h: int
+    color_hex: str
+    color_rgb: tuple[int, int, int]
+```
 
----
-
-### 5.3 `ConversionResult`
-
-Датакласс. Итоговый результат конвертации.
-
-| Поле | Тип | Описание |
-|------|-----|---------|
-| `mindcode` | `str` | Исходный код Mindcode (`.mnd`) |
-| `mlog` | `str` | Скомпилированный ассемблер Mlog |
-| `rectangles` | `List[Rect]` | Список всех прямоугольников |
-| `bg_color_rgb` | `Tuple[int,int,int]` | Фоновый цвет (RGB) |
-| `bg_color_hex` | `str` | Фоновый цвет (HEX) |
-| `color_count` | `int` | Количество уникальных цветов (включая фон) |
-| `estimated_instructions` | `int` | Точное число строк MLOG |
-| `grid_width` | `int` | Ширина сетки отрисовки |
-| `grid_height` | `int` | Высота сетки отрисовки |
-| `display_width` | `int` | Ширина целевого дисплея |
-| `display_height` | `int` | Высота целевого дисплея |
-| `preview_image` | `Image.Image` | PIL-изображение предпросмотра |
-| `processors` | `List[ProcessorCode]` | Код, разбитый по процессорам (минимум 1 элемент) |
-| `processor_count` | `int` | Количество процессоров |
-
-#### `ProcessorCode`
-
-Датакласс с кодом одного процессора (используется в мульти-процессорном режиме).
-
-| Поле | Тип | Описание |
-|------|-----|---------|
-| `index` | `int` | Номер процессора (с 1) |
-| `name` | `str` | Отображаемое имя |
-| `mindcode` | `str` | Mindcode только для этого процессора |
-| `mlog` | `str` | MLOG только для этого процессора |
-| `instruction_count` | `int` | Число инструкций (строк MLOG) |
-| `rect_count` | `int` | Число прямоугольников в этом процессоре |
+* Координаты `x` и `y` приведены к системе координат Mindustry (где $Y=0$ находится **снизу**).
 
 ---
 
-### 5.4 `ImageProcessor`
+### 5.3 `ProcessorCode`
 
-Статический класс. Загружает и квантует изображение.
+Датакласс фрагмента кода, привязанного к одному физическому процессору.
+
+```python
+@dataclass
+class ProcessorCode:
+    index: int
+    name: str
+    mindcode: str
+    mlog: str
+    instruction_count: int
+    rect_count: int
+```
+
+---
+
+### 5.4 `ConversionResult`
+
+Датакласс полного результата процесса конвертации.
+
+```python
+@dataclass
+class ConversionResult:
+    mindcode: str
+    mlog: str
+    rectangles: list[Rect]
+    bg_color_rgb: tuple[int, int, int]
+    bg_color_hex: str
+    color_count: int
+    estimated_instructions: int
+    grid_width: int
+    grid_height: int
+    display_width: int
+    display_height: int
+    preview_image: Image.Image
+    processors: list[ProcessorCode] = None
+    processor_count: int = 1
+```
+
+* Метод `__post_init__` инициализирует список процессоров при `None` и вычисляет `processor_count = len(self.processors)`.
+
+---
+
+### 5.5 `ImageProcessor`
+
+Статический класс предварительной обработки и квантования исходного изображения.
 
 #### Метод `load_and_preprocess(...)`
 
@@ -233,35 +249,31 @@ if __name__ == "__main__":
 def load_and_preprocess(
     image_path: str,
     target_display: DisplayConfig,
-    grid_size: Optional[Tuple[int, int]] = None,
-    aspect_mode: str = "fit",        # "fit" | "fill" | "stretch"
+    grid_size: tuple[int, int] | None = None,
+    aspect_mode: str = "fit",  # "fit", "fill", "stretch"
     num_colors: int = 16,
     dither: bool = False,
-) -> Tuple[Image.Image, Tuple[int,int,int], str, int, int, float, float, int, int]
+) -> tuple[Image.Image, tuple[int, int, int], str, int, int, float, float, int, int]:
 ```
 
-**Возвращает кортеж:** `(quantized_rgb, bg_rgb, bg_hex, gw, gh, scale_x, scale_y, offset_x, offset_y)`
+**Возвращает кортеж:**
+`(quantized_rgb, bg_rgb, bg_hex, gw, gh, scale_x, scale_y, offset_x, offset_y)`
 
-**Режимы масштабирования (`aspect_mode`):**
-
-| Режим | Поведение |
-|-------|----------|
-| `"fit"` | Вписать с сохранением пропорций, добавить чёрные поля |
-| `"fill"` | Заполнить с обрезкой краёв |
-| `"stretch"` | Растянуть без сохранения пропорций |
-
-**Алгоритм:**
-1. Открыть изображение, конвертировать в RGBA.
-2. Масштабировать согласно `aspect_mode`.
-3. Удалить альфа-канал (наложить на чёрный фон).
-4. Квантовать цвета методом Median Cut (`Image.Quantize.MEDIANCUT`), опционально с дизерингом Floyd-Steinberg.
-5. Определить доминантный цвет (самый частотный пиксель) — он станет фоном для команды `clear`.
+**Порядок работы:**
+1. Изображение открывается и переводится в RGBA.
+2. Масштабируется по алгоритму Lanczos согласно `aspect_mode`:
+   * `"fit"`: пропорциональное вписывание с центрированием на черном фоне.
+   * `"fill"`: заполнение экрана с обрезкой выступающих краев.
+   * `"stretch"`: растягивание до точного разрешения сетки.
+3. Альфа-канал удаляется наложением на черный цвет.
+4. Выполняется квантование цветов методом `Image.Quantize.MEDIANCUT` (опционально с дизерингом Floyd-Steinberg).
+5. Находится доминантный (самый частый) цвет палитры — он становится фоновым цветом `bg_rgb` для команды `draw clear`.
 
 ---
 
-### 5.5 `GreedyMesher`
+### 5.6 `GreedyMesher`
 
-Статический класс. Алгоритм 2D Greedy Meshing с инверсией оси Y.
+Статический класс объединения пикселей в прямоугольники (2D Greedy Meshing).
 
 #### Метод `mesh(...)`
 
@@ -269,483 +281,407 @@ def load_and_preprocess(
 @staticmethod
 def mesh(
     img_rgb: Image.Image,
-    bg_rgb: Tuple[int, int, int],
+    bg_rgb: tuple[int, int, int],
     grid_w: int,
     grid_h: int,
     scale_x: float,
     scale_y: float,
     offset_x: int = 0,
     offset_y: int = 0,
-) -> List[Rect]
+) -> list[Rect]:
 ```
 
-**Алгоритм:**
-1. Создаёт матрицу посещённых пикселей `visited[y][x]`.
-2. Пиксели фонового цвета пропускаются (они покрываются командой `clear`).
-3. Для каждого непосещённого пикселя:
-   - Расширяет полосу вправо по X, пока цвет совпадает.
-   - Расширяет прямоугольник вниз по Y, пока вся строка совпадает.
-   - Помечает все пиксели прямоугольника как посещённые.
-4. Инвертирует Y-координату: `y_mind = (grid_h - y - h) * scale_y`.
-5. Возвращает список `Rect` в координатах дисплея Mindustry.
-
-**Эффективность:** сокращает число примитивов в 5–30 раз по сравнению с попиксельным выводом.
+**Порядок работы:**
+1. Ведется 2D-матрица посещенных пикселей `visited[y][x]`.
+2. Пиксели, цвет которых совпадает с фоновым `bg_rgb`, сразу помечаются посещенными (их зальет `draw clear`).
+3. Для каждого непосещенного пикселя полоса расширяется вправо по оси $X$, пока цвет идентичен.
+4. Затем найденная горизонтальная полоса расширяется вниз по оси $Y$, пока все пиксели нижележащих строк имеют тот же цвет.
+5. Инвертируется координата $Y$ под систему Mindustry:
+   $$\text{mind\_y} = \text{round}((\text{grid\_h} - y - h) \times \text{scale\_y}) + \text{offset\_y}$$
+6. Возвращается список объектов `Rect`.
 
 ---
 
-### 5.6 `CodeCompiler`
+### 5.7 `CodeCompiler`
 
-Статический класс. Генерирует текст Mindcode и MLOG.
+Статический класс генерации исходного кода Mindcode и ассемблера MLOG.
+
+#### Метод `generate_processors(...)`
+
+```python
+@staticmethod
+def generate_processors(
+    rectangles: list[Rect],
+    bg_rgb: tuple[int, int, int],
+    display_name: str = "display1",
+    flush_interval: int = 200,
+    max_lines_per_proc: int = 950,
+    sync_delay: float = 0.25,
+    stop_at_end: bool = True,
+    instruction_limit: int | None = 1000,
+) -> list[ProcessorCode]:
+```
+
+Нарезает список прямоугольников на процессоры с соблюдением лимита `max_lines_per_proc` (по умолчанию 950 строк):
+* **Процессор 1**: очищает экран фоновым цветом (`clear` / `draw clear`), инициируя буфер команд.
+* **Процессоры 2..N**: не выполняют очистку экрана, а начинают с инструкции задержки `wait(delay)` для безопасной рассинхронизации отрисовки.
+* **Расчет емкости процессора**: перед добавлением каждого прямоугольника проверяется сумма инструкций: добавление цвета (`draw color`), прямоугольника (`draw rect`), возможного промежуточного сброса (`drawflush`) и закрывающих инструкций (`drawflush` + `stop`).
+* **Изоляция глобального цвета дисплея**: при каждом промежуточном `drawflush` цвет дисплея сбрасывается (`cur_color_hex = None`), поэтому следующая пачка гарантированно начинается с явной команды установки цвета. Это предотвращает артефакты в виде чужих цветов и белых пятен при параллельной работе нескольких процессоров.
 
 #### Метод `generate(...)`
 
 ```python
 @staticmethod
 def generate(
-    rectangles: List[Rect],
-    bg_rgb: Tuple[int, int, int],
+    rectangles: list[Rect],
+    bg_rgb: tuple[int, int, int],
     display_name: str = "display1",
     flush_interval: int = 200,
     stop_at_end: bool = True,
-    instruction_limit: Optional[int] = 1000,
+    instruction_limit: int | None = 1000,
     split_processors: bool = True,
     max_lines_per_proc: int = 950,
     sync_delay: float = 0.25,
-) -> Tuple[str, str, int, List[ProcessorCode]]
+) -> tuple[str, str, int, list[ProcessorCode]]:
 ```
 
-**Возвращает:** `(mindcode_str, mlog_str, instruction_count, processors)`
-
-Если `split_processors=True`, отрисовка нарезается на несколько процессоров
-(метод `generate_processors`): каждый процессор укладывается в
-`max_lines_per_proc` строк (по умолчанию 950 из жёсткого лимита 1000),
-первый процессор очищает экран, остальные начинают с `wait(delay)`,
-а каждый процессор завершается `drawflush` и `stop`.
-
-**Алгоритм генерации:**
-1. Группирует прямоугольники по `color_hex`.
-2. Сортирует группы по убыванию числа прямоугольников (наиболее частые цвета — первыми).
-3. Генерирует заголовок Mindcode с прагмами `#set instruction-limit` и `#set goal = size`.
-4. Добавляет `clear(r, g, b)` / `draw clear r g b 0 0 0` для фона (эта команда тоже занимает слот буфера отрисовки).
-5. Для каждой группы цвета:
-   - `color(r, g, b, 255)` / `draw color r g b 255 0 0`
-   - `rect(x, y, w, h)` / `draw rect x y w h 0 0` для каждого прямоугольника.
-   - Автоматически вставляет `drawflush` каждые `flush_interval` (200) операций (защита от переполнения буфера 256).
-   - После каждого промежуточного `drawflush` цвет выставляется заново: `draw color` — это глобальное состояние дисплея, а пачки команд от разных процессоров могут чередоваться, поэтому каждая новая пачка должна начинаться с явного `draw color`.
-6. Финальный `drawflush(display_name)` (срабатывает и для картинки без прямоугольников — фон всё равно нужно вытолкнуть на экран).
-7. Опционально `stopProcessor()` / `stop` для предотвращения мерцания.
-
-**Оптимизации:**
-- Один `color(...)` на цветовую группу внутри пачки (без повторов подряд).
-- Доминантный цвет покрывается одной командой `clear` вместо тысяч `rect`.
-- Автоматическое батчирование `drawflush`.
-- Повтор `draw color` в начале каждой пачки (1 лишняя инструкция на ~200 прямоугольников) — защита от «чужих» цветов и белых пятен при мульти-процессорной отрисовке.
+Точка входа компилятора:
+* При `split_processors=True`: вызывает `generate_processors(...)`. Если получился 1 процессор — возвращает его код; если несколько — формирует объединенный читаемый листинг с заголовками и возвращает `(mindcode_combined, mlog_combined, total_instructions, processors)`.
+* При `split_processors=False`: генерирует единый монолитный блок кода без разделения (для одного процессора или для World Processor).
 
 ---
 
-### 5.7 `ConverterService`
+### 5.8 `ConverterService`
 
-Главный сервисный класс. Объединяет все этапы конвейера.
+Высокоуровневый сервисный фасад конвейера конвертации.
 
-#### Метод `convert(...)`
-
-```python
-@classmethod
-def convert(
-    cls,
-    image_path: str,
-    display_key: str = "small",
-    grid_size: Optional[Tuple[int, int]] = None,
-    num_colors: int = 16,
-    aspect_mode: str = "fit",
-    dither: bool = False,
-    display_name: str = "display1",
-    instruction_limit: Optional[int] = 1000,
-    stop_at_end: bool = True,
-    split_processors: bool = True,
-    max_lines_per_proc: int = 950,
-    sync_delay: float = 0.25,
-) -> ConversionResult
-```
-
-Запускает полный конвейер: `ImageProcessor` → `GreedyMesher` → `CodeCompiler` → `render_preview`.
-
-`split_processors=True` включает нарезку на несколько процессоров, если
-однопроцессорный вариант превышает `max_lines_per_proc` строк.
-
-#### Метод `auto_fit_to_budget(...)`
-
-```python
-@classmethod
-def auto_fit_to_budget(
-    cls,
-    image_path: str,
-    display_key: str = "small",
-    max_instructions: int = 950,
-    aspect_mode: str = "fit",
-    display_name: str = "display1",
-) -> ConversionResult
-```
-
-Автоматически подбирает параметры, чтобы результат уложился в `max_instructions`.
-
-Авто-подгон всегда работает в режиме **одного процессора** (`split_processors=False`),
-поэтому сравнивает с лимитом именно однопроцессорный размер кода. Именно на этот
-режим переключается GUI после нажатия «Авто-подгон».
-
-**Алгоритм перебора:**
-- Масштабы: `[1.0, 0.8, 0.65, 0.5, 0.4, 0.3, 0.25]` от базового разрешения дисплея.
-- Цвета: `[16, 12, 8, 6, 4, 3, 2]`.
-- Перебор идёт от лучшего качества к худшему. Первый вариант, укладывающийся в лимит, возвращается.
-- Если ни один не подошёл — возвращается наилучший из найденных.
-- Крайний запасной вариант: сетка 24×24, 3 цвета.
-
-#### Метод `render_preview(...)`
-
-```python
-@staticmethod
-def render_preview(
-    disp_w: int,
-    disp_h: int,
-    bg_rgb: Tuple[int, int, int],
-    rectangles: List[Rect],
-) -> Image.Image
-```
-
-Создаёт PIL-изображение предпросмотра (рисует прямоугольники с инверсией Y обратно в PIL-координаты).
-
-#### Метод `compile_with_external_jar(...)`
-
-```python
-@staticmethod
-def compile_with_external_jar(
-    mindcode_source: str,
-    jar_path: str = "mindcode.jar",
-) -> Tuple[bool, str]
-```
-
-Опциональный метод. Компилирует Mindcode через официальный `mindcode.jar` (если он присутствует рядом с проектом). Запускает `java -jar mindcode.jar cm input.mnd -o output.mlog`. Возвращает `(success: bool, mlog_or_error: str)`.
+* `convert(...)` — запускает полный цикл (`ImageProcessor` → `GreedyMesher` → `CodeCompiler` → `render_preview`) и возвращает `ConversionResult`.
+* `auto_fit_to_budget(...)` — алгоритм авто-подгона параметров графики под бюджет в 950 инструкций для **одного** процессора:
+  * Перебирает сетки с масштабами `[1.0, 0.8, 0.65, 0.5, 0.4, 0.3, 0.25]` и палитры `[16, 12, 8, 6, 4, 3, 2]` цветов.
+  * Тестирует варианты от лучшего качества к наименьшему без дизеринга.
+  * Возвращает первый вариант, уложившийся в лимит, либо наименьший из найденных.
+* `render_preview(disp_w, disp_h, bg_rgb, rectangles) -> Image.Image` — отрисовывает предпросмотр экрана с обратной инверсией $Y$ в растровые координаты PIL.
+* `compile_with_external_jar(mindcode_source, jar_path="mindcode.jar") -> tuple[bool, str]` — компиляция кода через внешний официальный JAR-файл компилятора Mindcode (если установлен в системе).
 
 ---
 
-### 5.8 GUI: `ModernButton`
+### 5.9 `schematic_builder` (API и компоновка)
 
-Наследник `tk.Button`. Добавляет hover-эффект (смена цвета фона при наведении).
+Модуль генерации готовых схем Mindustry для прямого импорта на карту.
 
-| Параметр конструктора | По умолчанию | Описание |
-|-----------------------|-------------|---------|
-| `bg` | `C_BG_INPUT` | Нормальный фон |
-| `fg` | `C_TEXT_PRIMARY` | Цвет текста |
-| `hvr_bg` | `"#2c2c34"` | Фон при наведении |
-
-Метод `set_color(bg, hvr_bg)` — динамически меняет цветовую схему кнопки (используется для активной вкладки).
-
----
-
-### 5.9 GUI: `SegmentedControl`
-
-Наследник `tk.Frame`. Имитирует iOS-стиль переключателя: несколько кнопок в ряд, активная — синяя.
-
-**Конструктор:**
-```python
-SegmentedControl(master, options, default_value, on_change=None)
-# options: список кортежей [(value, label), ...]
-# on_change: callback(value) при переключении
-```
-
-Метод `get()` — возвращает текущее значение.  
-Метод `select(value)` — программно переключает.
-
----
-
-### 5.10 GUI: `ScrollableRow`
-
-Наследник `tk.Frame`. Ряд элементов с горизонтальной прокруткой — используется для списка кнопок процессоров, когда их больше, чем помещается по ширине.
+#### Датакласс `SchematicResult`
 
 ```python
-ScrollableRow(master, height=30)
+@dataclass
+class SchematicResult:
+    schematic_base64: str   # Base64-строка для вставки в игру через буфер (Ctrl+V)
+    schematic_bytes: bytes  # Бинарные данные .msch файла
+    block_count: int        # Общее число блоков (дисплей + процессоры)
+    processor_count: int    # Количество процессоров
+    display_type: str       # "small" или "large"
+    layout_width: int       # Ширина схемы в тайлах Mindustry
+    layout_height: int      # Высота схемы в тайлах Mindustry
 ```
 
-Внутри: `Canvas` + скрываемый горизонтальный `Scrollbar` + `inner`-фрейм, в который добавляются элементы.
+#### Функции модуля
 
-| Метод | Описание |
-|-------|---------|
-| `add(widget, **pack_options)` | Добавляет элемент в ряд и вешает на него прокрутку колесом |
-| `clear()` | Удаляет все элементы |
-| `reset_view()` | Прокручивает ряд в начало |
+| Функция | Сигнатура | Описание |
+|---------|-----------|---------|
+| `build_schematic` | `(result: ConversionResult, display_key: str = "small", display_name: str = "display1", schematic_name: str \| None = None) -> SchematicResult` | Собирает схему с дисплеем и процессорами, содержащими скомпилированный MLOG-код. |
+| `save_schematic_file` | `(result: SchematicResult, path: str) -> None` | Записывает байты схемы в бинарный файл `.msch`. |
+| `copy_schematic_to_clipboard` | `(result: SchematicResult) -> bool` | Помещает Base64-строку схемы в буфер обмена операционной системы. |
 
-Скроллбар показывается автоматически, только если содержимое шире панели. Колесо мыши прокручивает ряд влево/вправо.
+#### Алгоритм компоновки процессоров (`_processor_positions`)
+
+```python
+def _processor_positions(disp_size: int, proc_size: int, n: int) -> list[tuple[int, int]]:
+```
+
+* Дисплей центрируется в точке $(0, 0)$. Размеры дисплеев в тайлах: Small = 3×3, Large = 6×6. Процессор `logic-processor` имеет размер 2×2.
+* Координаты рассчитываются строго по тайловым границам `pymsch`:
+  $$\text{min\_c} = c - \lfloor(\text{size} - 1) / 2\rfloor, \quad \text{max\_c} = \text{min\_c} + \text{size} - 1$$
+* Первые $N$ процессоров равномерно распределяются по 4 сторонам:
+  1. Справа от дисплея (вдоль оси $Y$).
+  2. Сверху (вдоль оси $X$).
+  3. Слева (вдоль оси $Y$).
+  4. Снизу (вдоль оси $X$).
+* Если процессоров больше, чем периметр экрана, алгоритм автоматически выстраивает дополнительные параллельные колонки справа. Перекрытие процессоров и дисплея полностью исключено.
+* Для каждого процессора формируется объект `ProcessorLink(dx, dy, display_name)`, где `(dx, dy)` — вектор от центра процессора к центру экрана:
+  $$\text{link\_dx} = \text{disp\_x} - \text{proc\_x}, \quad \text{link\_dy} = \text{disp\_y} - \text{proc\_y}$$
 
 ---
 
-### 5.11 GUI: `AppGUI`
+### 5.10 GUI: `ModernButton`
 
-Главный класс приложения. Наследник `tk.Tk`.
+Кастомная кнопка на базе `tk.Button` с поддержкой плавного hover-эффекта и смены темы.
 
-**Состояние приложения:**
+* **Параметры**: `bg`, `fg`, `hvr_bg`, шрифт `Segoe UI 9 Bold`, плоский стиль (`relief="flat"`).
+* **Метод `set_color(bg, hvr_bg)`**: динамическое переключение палитры кнопки (используется для подсветки активных вкладок).
 
-| Атрибут | Тип | По умолчанию | Описание |
-|---------|-----|-------------|---------|
-| `current_image_path` | `Optional[str]` | `None` | Путь к загруженному файлу |
-| `current_result` | `Optional[ConversionResult]` | `None` | Последний результат конвертации |
-| `display_mode` | `str` | `"small"` | Тип дисплея (`"small"` / `"large"`) |
-| `processor_mode` | `str` | `"multi"` | Режим нарезки (`"multi"` / `"single"` / `"world"`) |
-| `aspect_mode` | `str` | `"fit"` | Режим масштабирования |
-| `num_colors` | `int` | `12` | Количество цветов палитры |
-| `dither` | `bool` | `False` | Флаг дизеринга |
-| `current_tab` | `str` | `"preview"` | Активная вкладка |
+---
 
-**Структура интерфейса:**
+### 5.11 GUI: `SegmentedControl`
+
+Переключатель вариантов в стиле сегментированных кнопок на базе `tk.Frame`.
+
+* **Конструктор**: `SegmentedControl(master, options, default_value, on_change=None)`
+  * `options`: список кортежей `[(key, label), ...]`.
+  * `on_change`: callback-функция, принимающая выбранный `key`.
+* **Методы**:
+  * `get() -> str`: получение текущего ключа.
+  * `select(value)`: программное переключение активного сегмента с подсветкой.
+
+---
+
+### 5.12 GUI: `AppGUI`
+
+Главное окно приложения (`tk.Tk`), размер по умолчанию 1200×780 (минимум 1000×660).
+
+#### Архитектура интерфейса
 
 ```
-AppGUI (1200×780, минимум 1000×660)
-├── Header (верхняя панель)
+AppGUI (1200×780)
+├── Header (верхняя плашка)
 │   ├── Заголовок «Mindcode Image Converter»
-│   ├── Подзаголовок
-│   └── Бейдж «v160.7 | Direct MLOG Ready»
+│   ├── Подзаголовок версии 160.7
+│   └── Бейдж «v160.7 | Multi-Proc Ready»
 │
-├── Body (основное тело)
-│   ├── Sidebar (ширина 320px)
-│   │   ├── Карточка «ИЗОБРАЖЕНИЕ»
-│   │   │   ├── Кнопка «📂 Загрузить файл...»
-│   │   │   └── Метка с именем файла
+├── Body (основная рабочая область)
+│   ├── Sidebar (боковая панель управления, ширина 320px)
+│   │   ├── Карточка «ИЗОБРАЖЕНИЕ» (загрузка файла, имя и разрешение)
 │   │   ├── Карточка «MINDUSTRY ПАРАМЕТРЫ»
-│   │   │   ├── SegmentedControl: тип экрана (80×80 / 176×176)
-│   │   │   ├── SegmentedControl: режим нарезки (Мульти-проц / 1 проц / World)
-│   │   │   └── Entry: имя дисплея в игре
+│   │   │   ├── Экран: 80×80 (Logic) / 176×176 (Large)
+│   │   │   ├── Режим: Мульти-проц / 1 проц (≤1000) / World
+│   │   │   └── Имя дисплея в игре (entry, по умолчанию "display1")
 │   │   ├── Карточка «ГРАФИКА И СЖАТИЕ»
-│   │   │   ├── SegmentedControl: масштабирование (Вписать/Заполнить/Растянуть)
-│   │   │   ├── Слайдер: кол-во цветов (2–32)
-│   │   │   └── Checkbox: сглаживание Floyd-Steinberg
+│   │   │   ├── Масштабирование: Вписать / Заполнить / Растянуть
+│   │   │   ├── Слайдер палитры: 2–32 цвета
+│   │   │   └── Чекбокс дизеринга Floyd-Steinberg
 │   │   ├── Кнопка «🚀 Авто-подгон под 1000 строк»
 │   │   └── Кнопка «⚡ Пересчитать»
 │   │
-│   └── Main Area
-│       ├── Tab Bar
-│       │   ├── «🖼️ Предпросмотр дисплея»
-│       │   ├── «⚡ Готовый MLOG (в процессор)»
-│       │   └── «📜 Код Mindcode (.mnd)»
-│       └── View Container
-│           ├── frame_preview: canvas исходника + canvas предпросмотра
-│           ├── frame_mlog: редактор MLOG + прокручиваемый ряд процессоров (#1, #2, ...)
-│           └── frame_mindcode: редактор Mindcode + прокручиваемый ряд процессоров
+│   └── Main Area (вкладки и рабочая зона)
+│       ├── Таб-бар: [🖼️ Предпросмотр] [⚡ MLOG] [📜 Mindcode] [📦 Схема (.msch)]
+│       └── View Container:
+│           ├── frame_preview: холст оригинала + холст дисплея Mindustry
+│           ├── frame_mlog: панель выбора процессора (#1, #2... Все вместе) + текстовый редактор MLOG
+│           ├── frame_mindcode: панель выбора процессора + текстовый редактор Mindcode
+│           └── frame_schematic: кнопки копирования/сохранения + статус блоков + Base64 схемы
 │
-├── Footer (нижняя панель)
-│   ├── Бейдж счётчика инструкций (OK / Превышение / World)
-│   ├── Метка с деталями (прямоугольников, цветов, фон)
-│   ├── Кнопка «💾 Сохранить все .mlog»
-│   ├── Кнопка «📋 Скопировать Mindcode»
-│   └── Кнопка «⚡ Скопировать MLOG (для игры)»
-│
-└── Всплывающая надпись о копировании (появляется над футером и исчезает через ~2 с)
+└── Footer (нижняя статусная строка и быстрые действия)
+    ├── Бейдж статуса (зеленый OK / красный Превышение / фиолетовый Мульти-проц / синий World)
+    ├── Детализация (число прямоугольников, цветов, код фона, количество процессоров)
+    ├── Кнопка «💾 Сохранить .mlog» (для мульти-процессора сохраняет архив файлов в папку)
+    ├── Кнопка «📋 Скопировать Mindcode»
+    ├── Кнопка «⚡ Скопировать MLOG (для игры)»
+    ├── Кнопка «📦 Скопировать схему (.msch)»
+    ├── Кнопка «💾 Сохранить .msch»
+    └── Кнопка «▶ След. (#2)» (пошаговая навигация при заполнении процессоров вручную)
 ```
 
-**Ключевые методы `AppGUI`:**
+#### Методы `AppGUI`
 
-| Метод | Описание |
-|-------|---------|
-| `_build_layout()` | Строит всю структуру окна |
-| `_build_sidebar(parent)` | Строит боковую панель с настройками |
-| `_build_main_area()` | Строит главную рабочую зону с вкладками |
-| `_build_footer()` | Строит нижнюю статус-строку |
-| `_switch_tab(tab)` | Переключает активную вкладку |
-| `_run_conversion()` | Запускает `ConverterService.convert()` с текущими настройками |
-| `_on_auto_fit()` | Запускает `ConverterService.auto_fit_to_budget()` |
-| `_update_ui_state(res)` | Обновляет все виджеты по результату конвертации |
-| `_render_canvases(res)` | Перерисовывает canvas исходника и предпросмотра |
-| `_create_proc_bar(parent)` | Создаёт прокручиваемый ряд кнопок процессоров |
-| `_on_copy_mlog()` | Копирует MLOG в буфер обмена |
-| `_on_copy_mindcode()` | Копирует Mindcode в буфер обмена |
-| `_show_notice(text)` | Показывает всплывающую надпись над футером (~2 с) |
-| `_hide_notice()` | Скрывает всплывающую надпись |
-| `_on_save_mlog()` | Сохраняет MLOG через диалог «Сохранить как» |
-| `_on_select_file()` | Открывает диалог выбора файла |
+| Метод | Назначение |
+|-------|-----------|
+| `_build_layout()` | Создает каркас: Header, Footer, Sidebar, Main Area. |
+| `_build_sidebar(parent)` | Инициализирует карточки параметров и кнопки пересчета. |
+| `_build_main_area()` | Создает таб-бар и контейнеры 4 рабочих вкладок. |
+| `_build_footer()` | Создает бейджи статуса и кнопки сохранения/копирования. |
+| `_create_text_editor(parent)` | Создает текстовое поле с двойным скроллбаром (`Consolas 10`). |
+| `_switch_tab(tab)` | Переключает видимую вкладку (`preview`, `mlog`, `mindcode`, `schematic`). |
+| `_rebuild_proc_tabs(processors)` | Перестраивает горизонтальный ряд кнопок процессоров (`#1`, `#2`... «Все вместе»). |
+| `_update_proc_tab_colors()` | Подсвечивает кнопку текущего выбранного процессора оранжевым цветом. |
+| `_select_proc(idx)` | Переключает текст в редакторах на код конкретного процессора (или общий код при `-1`). |
+| `_on_next_proc()` | Переходит к следующему процессору по цепочке (для удобного копирования в игре). |
+| `_run_conversion()` | Считывает настройки UI и выполняет `ConverterService.convert(...)`. |
+| `_on_auto_fit()` | Вызывает автоматический подбор сетки и палитры под 1 процессор. |
+| `_update_ui_state(res)` | Обновляет все поля, бейджи, текст схемы и холсты предпросмотра. |
+| `_render_canvases(res)` | Масштабирует и центрирует оригинал и пиксельную графику на Canvas. |
+| `_build_schematic_result()` | Формирует `SchematicResult` через `schematic_builder`. |
+| `_on_copy_mlog()` | Копирует активный MLOG в буфер обмена с инструкцией по вставке в процессор. |
+| `_on_copy_mindcode()` | Копирует исходный Mindcode в буфер обмена. |
+| `_on_save_mlog()` | Сохраняет один файл `.mlog` или распределяет файлы по папке для мульти-процессора. |
+| `_on_copy_schematic()` | Помещает Base64-код схемы в буфер обмена для импорта в игре. |
+| `_on_save_schematic()` | Сохраняет файл `.msch` на диск. |
 
 ---
 
 ## 6. Конвейер обработки изображения
 
 ```
-Исходное изображение (PNG / JPG / BMP / WEBP)
-         │
-         ▼
+Исходный растровый файл (PNG, JPG, BMP, WEBP, GIF)
+                  │
+                  ▼
 1. ImageProcessor.load_and_preprocess()
-   ├── Открыть → конвертировать в RGBA
-   ├── Масштабировать под grid_size (fit / fill / stretch)
-   ├── Убрать альфа-канал (наложить на чёрный холст)
-   └── Квантовать цвета (Median Cut, 2–64 цвета)
-         │
-         ▼
+   ├── Конвертация в RGBA
+   ├── Масштабирование под сетку (Fit / Fill / Stretch)
+   ├── Удаление альфа-канала наложением на черный цвет
+   ├── Квантование цветов (Median Cut, 2–32 цвета)
+   └── Определение доминантного цвета фона (bg_rgb)
+                  │
+                  ▼
 2. GreedyMesher.mesh()
-   ├── Пропустить пиксели доминантного цвета (они — фон)
-   ├── Расширить каждый регион по X (горизонтальная полоса)
-   ├── Расширить полосу по Y (прямоугольный блок)
-   └── Инвертировать Y: y_mind = (grid_h − y − h) × scale_y
-         │
-         ▼
-3. CodeCompiler.generate()
-   ├── Сгруппировать Rect по цвету
-   ├── Сортировать по убыванию количества (частые цвета — первыми)
-   ├── Написать header + #set прагмы
-   ├── draw clear / draw(:clear) — фоновый цвет
-   ├── Для каждой группы: draw color + N×draw rect
-   ├── Вставлять drawflush каждые 200 команд
-   └── Финальный drawflush + stop
-         │
-         ▼
-4. ConverterService.render_preview()
-   └── Нарисовать PIL-изображение предпросмотра
-         │
-         ▼
-ConversionResult
-   ├── .mindcode  → файл .mnd
-   ├── .mlog      → файл .mlog / буфер обмена / процессор игры
-   └── .preview_image → canvas в GUI
+   ├── Игнорирование фоновых пикселей (будут залиты командой clear)
+   ├── Жадное расширение не посещенных пикселей по оси X в полосы
+   ├── Жадное расширение полос по оси Y в максимальные прямоугольники
+   └── Перевод координат в систему Mindustry (Y=0 снизу):
+       y_mind = (grid_h − y_pil − h) × scale_y
+                  │
+                  ▼
+3. CodeCompiler.generate() / generate_processors()
+   ├── Группировка Rect по цвету и сортировка по убыванию частоты
+   ├── Нарезка на пачки до max_lines_per_proc (950 строк)
+   ├── Формирование заголовков и прагм (#set instruction-limit, #set goal = size)
+   ├── Процессор 1: draw clear (очистка дисплея)
+   ├── Процессоры 2..N: wait(delay) (рассинхронизация)
+   ├── Для каждой группы: draw color + серия draw rect
+   ├── Промежуточные drawflush каждые 200 инструкций
+   ├── Гарантированный повтор draw color после каждого drawflush
+   └── Завершение каждого процессора: drawflush + stop
+                  │
+                  ▼
+4. schematic_builder.build_schematic()
+   ├── Позиционирование процессоров 2×2 вокруг экрана (без коллизий)
+   ├── Линковка процессоров к экрану через ProcessorLink(dx, dy)
+   └── Упаковка MLOG в ProcessorConfig и сборка .msch
+                  │
+                  ▼
+5. Результат (ConversionResult & SchematicResult)
+   ├── Предпросмотр в GUI
+   ├── .mlog (вставка в процессор игры по Ctrl+V)
+   ├── .mnd (исходник Mindcode)
+   └── Схема в буфере обмена (Mindustry → Схемы → Импорт)
 ```
 
 ---
 
-## 7. Технические ограничения Mindustry 160.7
+## 7. Технические особенности и логика Mindustry 160.7
 
-### Система координат
+### 1. Система координат
+* В Mindustry точка $(0, 0)$ находится в **левом нижнем углу** экрана.
+* В растровых изображениях и PIL точка $(0, 0)$ находится в **левом верхнем углу**.
+* Формула трансляции:
+  $$y_{\text{mind}} = (\text{grid\_h} - y_{\text{pil}} - h_{\text{rect}}) \times \text{scale\_y}$$
 
-Начало `(0, 0)` в Mindustry — **левый нижний угол** дисплея.  
-В PIL — **левый верхний угол**.
+### 2. Буфер команд рисования (Draw Buffer)
+* Процессоры Mindustry накапливают команды рисования во внутреннем буфере размером **256 операций**.
+* Если не вызвать `drawflush` вовремя, новые команды вытесняют старые, приводя к потере частей рисунка.
+* Программа выполняет промежуточный сброс каждые **200 операций** (`flush_interval=200`), гарантируя запас в 56 команд.
 
-Формула инверсии:
-```
-y_mind = (grid_height − y_pil − rect_height) × scale_y
-```
+### 3. Лимит инструкций и поведение парсера `LParser`
+* Стандартные процессоры (Micro, Logic, Hyper) имеют жесткий предел **1000 инструкций MLOG**.
+* В ванильной версии Mindustry парсер `LParser` обрезает вставляемый код ровно до 1000 строк даже для **World Processor** (хотя у него снят лимит скорости выполнения до 8000 ipt).
+* Режимы работы генератора:
+  * **Мульти-проц (по умолчанию)**: делит код на блоки по ≤950 строк на процессор, решая проблему лимита для любых детализированных изображений.
+  * **1 проц (≤1000)**: режим одного процессора с ручной настройкой или использованием кнопки «Авто-подгон».
+  * **World**: единый сплошной листинг без разделения на процессоры (для модифицированных клиентов игры).
 
-### Буфер команд рисования (Draw Buffer)
-
-Процессор Mindustry хранит до **256 команд рисования** между вызовами `drawflush`. При превышении ранние команды теряются.
-
-Программа автоматически вставляет `drawflush` каждые **200 операций** (`flush_interval=200`).
-
-### Лимит инструкций процессора
-
-Стандартные процессоры (Micro, Logic, Hyper) имеют жёсткий лимит **1000 инструкций MLOG**.
-В чистой (vanilla) версии Mindustry парсер `LParser` также обрезает код до 1000 строк при вставке в **World Processor** (у World Processor снят лимит скорости выполнения — до 8000 ipt, но не лимит строк при парсинге).
-
-Режимы:
-- **Мульти-проц (по умолчанию)** — автоматическая нарезка отрисовки на несколько процессоров по ≤950 строк каждый (решает проблему лимита для любых сложных и детализированных изображений).
-- **Стандарт (≤1000)** — один процессор; для сложных изображений требуется использовать кнопку «Авто-подгон».
-- **World Processor** — генерация единого непрерывного кода без разделения (для модифицированных клиентов игры со снятым лимитом строк).
-
-### Прагмы оптимизации Mindcode
-
-```mindcode
-#set instruction-limit = 1000;
-#set goal = size;
-```
-
-`goal = size` указывает компилятору Mindcode минимизировать размер выходного MLOG, а не скорость.
-
-### Целевые дисплеи
-
-| Блок | Ключ | Разрешение |
-|------|------|-----------|
-| `@logic-display` | `"small"` | 80 × 80 px |
-| `@large-logic-display` | `"large"` | 176 × 176 px |
+### 4. Мульти-процессорная синхронизация и защита цвета
+* Команда `draw color r g b a 0 0` меняет **глобальное состояние цвета самого дисплея**, а не прикрепляется к конкретному вызову `rect`.
+* Когда несколько процессоров параллельно отправляют пачки команд через `drawflush`, порядок их исполнения дисплеем может чередоваться. Если процессор после `drawflush` продолжит рисовать без явного указания цвета, его прямоугольники окрасятся цветом другого процессора (на светлых участках это дает эффект белых пятен).
+* Компилятор принудительно выставляет `draw color` в начале каждой новой пачки команд после сброса буфера.
 
 ---
 
-## 8. Формат выходных файлов
+## 8. Форматы выходных данных
 
-### `.mnd` — исходный Mindcode
+### 8.1 `.mnd` — исходный код Mindcode
 
-Читаемый исходный код с комментариями. Компилируется компилятором Mindcode (или `mindcode.jar`) в MLOG.
+Высокоуровневый структурированный код:
 
 ```mindcode
 // ========================================================
-// Сгенерировано Mindcode Image Converter для Mindustry 160.7
+// Часть 1: Процессор #1
 // Целевой экран: display1
 // ========================================================
 
 #set instruction-limit = 1000;
 #set goal = size;
 
-// 1. Очистка экрана цветом фона
-clear(18, 18, 18);
+// 1. Очистка экрана цветом фона (только Процессор 1)
+clear(24, 24, 28);
 
-// 2. Отрисовка графических примитивов (Цветов: 5, Прямоугольников: 42)
+// Цвет #E08244
+color(224, 130, 68, 255);
+rect(12, 10, 24, 8);
+rect(40, 10, 16, 8);
 
-// Цвет #FFB000 (примитивов: 15)
-color(255, 176, 0, 255);
-rect(10, 15, 30, 20);
-rect(45, 15, 25, 20);
-
-// ...
-
-// Сброс буфера команд на дисплей
+// Сброс буфера на дисплей
 drawflush(display1);
 
-// Остановка процессора для предотвращения мерцания
+// Остановка процессора
 stopProcessor();
 ```
 
-### `.mlog` — ассемблер Mindustry Logic
+---
 
-Прямой ассемблер. Вставляется в процессор через кнопку «Вставить из буфера» или `Ctrl+V`.
+### 8.2 `.mlog` — ассемблер Mindustry Logic
+
+Низкоуровневые инструкции для вставки в процессор через `Ctrl+V` («Вставить из буфера»):
 
 ```mlog
-draw clear 18 18 18 0 0 0
-draw color 255 176 0 255 0 0
-draw rect 10 15 30 20 0 0
-draw rect 45 15 25 20 0 0
+draw clear 24 24 28 0 0 0
+draw color 224 130 68 255 0 0
+draw rect 12 10 24 8 0 0
+draw rect 40 10 16 8 0 0
+drawflush display1
+stop
+```
+
+Для процессоров №2..N первой инструкцией генерируется задержка:
+```mlog
+wait 0.25
+draw color 180 50 50 255 0 0
+draw rect 0 30 80 15 0 0
 drawflush display1
 stop
 ```
 
 ---
 
-## 9. Документация в папке `doc/`
+### 8.3 `.msch` и Base64 — схема Mindustry
 
-| Файл | Описание |
-|------|---------|
-| `MINDCODE_DOCUMENTATION.md` | Полная официальная документация языка Mindcode (66 КБ) |
-| `MINDUSTRY_GUIDE.md` | Руководство по Mindustry Logic, дисплеям и процессорам (36 КБ) |
-| `rule.md` | Правило выбора формата кода: Mindcode — по умолчанию, чистый MLOG — только по явному запросу |
+Бинарный формат схем Mindustry:
+* Заголовок схемы `MSCH` с gzip/zlib-компрессией.
+* Содержит метаданные (название схемы, теги `image`, `display`).
+* Содержит блок дисплея и $N$ логических процессоров с предзаписанным побайтовым кодом конфигурации `ProcessorConfig` и связями `ProcessorLink`.
+* **Импорт в игру**:
+  * **Через буфер обмена**: в GUI нажать «📦 Скопировать схему» → в игре перейти в `Core` → `Схемы` → `Импорт` → `Вставить из буфера обмена`.
+  * **Через файл**: сохранить `.msch` → в игре выбрать `Импорт схемы из файла`.
 
 ---
 
-## 10. Зависимости
+## 9. Зависимости и системные требования
 
 ### Python
 
-Минимальная версия: **Python 3.9+** (используется `Image.Resampling`, доступный с 3.9).  
-Фактически в проекте использован **Python 3.14** (согласно `.pyc`-файлам в `__pycache__`).
+* **Минимальная версия: Python 3.10+**  
+  (в коде ядра и интерфейса используются современные аннотации типов объединения PEP 604 вида `Type | None`).
 
-### Стандартная библиотека (не требует установки)
+### Стандартная библиотека (встроена в Python)
 
-- `os` — работа с путями и файловой системой
-- `subprocess` — запуск внешнего `mindcode.jar`
-- `tempfile` — временные файлы для компиляции через jar
-- `dataclasses` — структуры данных и датаклассы
-- `typing` — аннотации типов
-- `tkinter` — графический интерфейс (GUI) и буфер обмена
+* `os`, `sys`, `subprocess`, `tempfile` — работа с процессами и путями.
+* `dataclasses`, `typing` — структуры данных и строгая типизация.
+* `base64` — кодирование схем для импорта в игру.
+* `tkinter`, `filedialog`, `messagebox` — графический интерфейс.
 
-### Сторонние библиотеки (требуют установки)
+### Сторонние библиотеки
+
+Установка всех необходимых зависимостей одной командой:
 
 ```bash
 pip install pillow pymsch
 ```
 
-| Библиотека | Назначение |
-|-----------|-----------|
-| `Pillow (PIL)` | Загрузка, масштабирование, квантование изображений; `ImageTk` для GUI |
-| `pymsch` | Генерация и сборка схем Mindustry (`.msch` / Base64) с процессорами и дисплеем |
+| Библиотека | Минимальная версия | Назначение в проекте |
+|------------|-------------------|----------------------|
+| `pillow` | `>=9.0.0` | Масштабирование (Lanczos), квантование (Median Cut), дизеринг и виджеты ImageTk |
+| `pymsch` | `>=0.1.0` | Сериализация, позиционирование блоков и сборка `.msch` схем Mindustry |
 
-### Опциональные зависимости
+### Опциональные инструменты
 
-| Инструмент | Назначение |
-|-----------|-----------|
-| `java` (JRE/JDK) | Компиляция через официальный `mindcode.jar` (метод `compile_with_external_jar`) |
-| `mindcode.jar` | Официальный компилятор Mindcode (должен лежать рядом с проектом) |
+* **`mindcode.jar` и JRE/JDK 17+**: требуются только при вызове метода `ConverterService.compile_with_external_jar(...)` для внешней проверки компиляции официальным компилятором Mindcode. Встроенный генератор MLOG работает автономно на чистом Python без внешних зависимостей.
 
 ---
 
-*Документация сгенерирована автоматически на основе анализа исходного кода проекта.*  
-*Версия: Mindustry release build 160.7*
-
+*Документация актуализирована под версию Mindustry release build 160.7 и текущую кодовую базу.*
