@@ -3,11 +3,11 @@ Mindcode Image Converter - Core Engine
 Модуль обработки изображений, 2D Greedy Meshing и компиляции в Mindcode / Mlog для Mindustry 160.7.
 """
 
-from dataclasses import dataclass
-from typing import List, Tuple, Dict, Optional
-import subprocess
 import os
+import subprocess
 import tempfile
+from dataclasses import dataclass
+
 from PIL import Image
 
 
@@ -31,7 +31,7 @@ class Rect:
     w: int
     h: int
     color_hex: str
-    color_rgb: Tuple[int, int, int]
+    color_rgb: tuple[int, int, int]
 
 
 @dataclass
@@ -48,8 +48,8 @@ class ProcessorCode:
 class ConversionResult:
     mindcode: str
     mlog: str
-    rectangles: List[Rect]
-    bg_color_rgb: Tuple[int, int, int]
+    rectangles: list[Rect]
+    bg_color_rgb: tuple[int, int, int]
     bg_color_hex: str
     color_count: int
     estimated_instructions: int
@@ -58,7 +58,7 @@ class ConversionResult:
     display_width: int
     display_height: int
     preview_image: Image.Image
-    processors: List[ProcessorCode] = None
+    processors: list[ProcessorCode] = None
     processor_count: int = 1
 
     def __post_init__(self):
@@ -77,11 +77,11 @@ class ImageProcessor:
     def load_and_preprocess(
         image_path: str,
         target_display: DisplayConfig,
-        grid_size: Optional[Tuple[int, int]] = None,
+        grid_size: tuple[int, int] | None = None,
         aspect_mode: str = "fit",  # "fit", "fill", "stretch"
         num_colors: int = 16,
         dither: bool = False,
-    ) -> Tuple[Image.Image, Tuple[int, int, int], str, int, int, float, float, int, int]:
+    ) -> tuple[Image.Image, tuple[int, int, int], str, int, int, float, float, int, int]:
         img = Image.open(image_path).convert("RGBA")
         
         disp_w = target_display.width
@@ -162,17 +162,17 @@ class GreedyMesher:
     @staticmethod
     def mesh(
         img_rgb: Image.Image,
-        bg_rgb: Tuple[int, int, int],
+        bg_rgb: tuple[int, int, int],
         grid_w: int,
         grid_h: int,
         scale_x: float,
         scale_y: float,
         offset_x: int = 0,
         offset_y: int = 0,
-    ) -> List[Rect]:
+    ) -> list[Rect]:
         pixels = img_rgb.load()
         visited = [[False for _ in range(grid_w)] for _ in range(grid_h)]
-        rectangles: List[Rect] = []
+        rectangles: list[Rect] = []
 
         for y in range(grid_h):
             for x in range(grid_w):
@@ -206,10 +206,10 @@ class GreedyMesher:
                         visited[y + dy][x + dx] = True
 
                 # Инверсия Y для Mindustry: y_mind = (grid_h - y - h) * scale_y
-                mind_x = int(round(x * scale_x)) + offset_x
-                mind_y = int(round((grid_h - y - h) * scale_y)) + offset_y
-                mind_w = max(1, int(round(w * scale_x)))
-                mind_h = max(1, int(round(h * scale_y)))
+                mind_x = round(x * scale_x) + offset_x
+                mind_y = round((grid_h - y - h) * scale_y) + offset_y
+                mind_w = max(1, round(w * scale_x))
+                mind_h = max(1, round(h * scale_y))
 
                 hex_color = f"{col[0]:02X}{col[1]:02X}{col[2]:02X}"
                 rectangles.append(Rect(mind_x, mind_y, mind_w, mind_h, hex_color, col))
@@ -222,15 +222,15 @@ class CodeCompiler:
 
     @staticmethod
     def generate_processors(
-        rectangles: List[Rect],
-        bg_rgb: Tuple[int, int, int],
+        rectangles: list[Rect],
+        bg_rgb: tuple[int, int, int],
         display_name: str = "display1",
         flush_interval: int = 200,
         max_lines_per_proc: int = 950,
         sync_delay: float = 0.25,
         stop_at_end: bool = True,
-        instruction_limit: Optional[int] = 1000,
-    ) -> List[ProcessorCode]:
+        instruction_limit: int | None = 1000,
+    ) -> list[ProcessorCode]:
         """
         Нарезает отрисовку прямоугольников на несколько процессоров так,
         чтобы каждый процессор укладывался в лимит max_lines_per_proc (по умолчанию 950 строк, жесткий лимит игры 1000).
@@ -243,7 +243,7 @@ class CodeCompiler:
           - Цвет перевыставляется после каждого промежуточного drawflush: цвет —
             глобальное состояние дисплея, и пачки от разных процессоров чередуются.
         """
-        color_groups: Dict[str, List[Rect]] = {}
+        color_groups: dict[str, list[Rect]] = {}
         for rect in rectangles:
             if rect.color_hex not in color_groups:
                 color_groups[rect.color_hex] = []
@@ -251,15 +251,15 @@ class CodeCompiler:
 
         sorted_groups = sorted(color_groups.items(), key=lambda item: len(item[1]), reverse=True)
 
-        procs: List[ProcessorCode] = []
+        procs: list[ProcessorCode] = []
         proc_idx = 1
 
-        cur_mlog: List[str] = []
-        cur_mc: List[str] = []
+        cur_mlog: list[str] = []
+        cur_mc: list[str] = []
         cur_lines = 0
         cur_rects = 0
         cur_buffer = 0
-        cur_color_hex: Optional[str] = None
+        cur_color_hex: str | None = None
 
         def start_new_proc():
             nonlocal cur_mlog, cur_mc, cur_lines, cur_rects, cur_buffer, cur_color_hex
@@ -289,7 +289,7 @@ class CodeCompiler:
                 # иначе для картинки без прямоугольников не будет ни одного drawflush
                 cur_buffer = 1
             else:
-                delay = round((proc_idx - 1) * sync_delay, 2)
+                delay = round(min(2.5, (proc_idx - 1) * sync_delay), 2)
                 cur_mc.append(f"// Задержка {delay}с (ждем очистки экрана Процессором 1)")
                 cur_mc.append(f"wait({delay});\n")
                 cur_mlog.append(f"wait {delay}")
@@ -298,7 +298,7 @@ class CodeCompiler:
         def close_current_proc():
             nonlocal proc_idx, cur_lines, cur_buffer
             if cur_buffer > 0:
-                cur_mc.append(f"\n// Сброс буфера на дисплей")
+                cur_mc.append("\n// Сброс буфера на дисплей")
                 cur_mc.append(f"drawflush({display_name});")
                 cur_mlog.append(f"drawflush {display_name}")
                 cur_lines += 1
@@ -376,16 +376,16 @@ class CodeCompiler:
 
     @staticmethod
     def generate(
-        rectangles: List[Rect],
-        bg_rgb: Tuple[int, int, int],
+        rectangles: list[Rect],
+        bg_rgb: tuple[int, int, int],
         display_name: str = "display1",
         flush_interval: int = 200,
         stop_at_end: bool = True,
-        instruction_limit: Optional[int] = 1000,
+        instruction_limit: int | None = 1000,
         split_processors: bool = True,
         max_lines_per_proc: int = 950,
         sync_delay: float = 0.25,
-    ) -> Tuple[str, str, int, List[ProcessorCode]]:
+    ) -> tuple[str, str, int, list[ProcessorCode]]:
         """
         Генерирует исходники Mindcode и MLOG с поддержкой разделения по процессорам.
         Возвращает: (mindcode_str, mlog_str, total_instructions, processors)
@@ -420,7 +420,7 @@ class CodeCompiler:
             return "\n\n".join(mc_combined), "\n\n".join(mlog_combined), total_instructions, processors
 
         # Однопроцессорный режим без нарезки
-        color_groups: Dict[str, List[Rect]] = {}
+        color_groups: dict[str, list[Rect]] = {}
         for rect in rectangles:
             if rect.color_hex not in color_groups:
                 color_groups[rect.color_hex] = []
@@ -471,7 +471,7 @@ class CodeCompiler:
                     buffer_counter = 0
 
         if buffer_counter > 0:
-            mc.append(f"\n// Сброс буфера команд на дисплей")
+            mc.append("\n// Сброс буфера команд на дисплей")
             mc.append(f"drawflush({display_name});")
             mlog.append(f"drawflush {display_name}")
             instruction_count += 1
@@ -504,12 +504,12 @@ class ConverterService:
         cls,
         image_path: str,
         display_key: str = "small",
-        grid_size: Optional[Tuple[int, int]] = None,
+        grid_size: tuple[int, int] | None = None,
         num_colors: int = 16,
         aspect_mode: str = "fit",
         dither: bool = False,
         display_name: str = "display1",
-        instruction_limit: Optional[int] = 1000,
+        instruction_limit: int | None = 1000,
         stop_at_end: bool = True,
         split_processors: bool = True,
         max_lines_per_proc: int = 950,
@@ -557,7 +557,7 @@ class ConverterService:
             rectangles=rectangles,
             bg_color_rgb=bg_rgb,
             bg_color_hex=bg_hex,
-            color_count=len(set(r.color_hex for r in rectangles)) + 1,
+            color_count=len({r.color_hex for r in rectangles}) + 1,
             estimated_instructions=instructions,
             grid_width=gw,
             grid_height=gh,
@@ -590,7 +590,7 @@ class ConverterService:
                 candidate_resolutions.append((gw, gh))
 
         candidate_colors = [16, 12, 8, 6, 4, 3, 2]
-        best_result: Optional[ConversionResult] = None
+        best_result: ConversionResult | None = None
 
         for gw, gh in candidate_resolutions:
             for n_colors in candidate_colors:
@@ -627,8 +627,8 @@ class ConverterService:
     def render_preview(
         disp_w: int,
         disp_h: int,
-        bg_rgb: Tuple[int, int, int],
-        rectangles: List[Rect]
+        bg_rgb: tuple[int, int, int],
+        rectangles: list[Rect]
     ) -> Image.Image:
         img = Image.new("RGB", (disp_w, disp_h), bg_rgb)
         pixels = img.load()
@@ -643,7 +643,7 @@ class ConverterService:
         return img
 
     @staticmethod
-    def compile_with_external_jar(mindcode_source: str, jar_path: str = "mindcode.jar") -> Tuple[bool, str]:
+    def compile_with_external_jar(mindcode_source: str, jar_path: str = "mindcode.jar") -> tuple[bool, str]:
         """Компилирует через внешний официальный mindcode.jar, если он присутствует."""
         if not os.path.exists(jar_path):
             return False, f"Файл {jar_path} не найден!"
@@ -656,14 +656,14 @@ class ConverterService:
 
         try:
             cmd = ["java", "-jar", jar_path, "cm", temp_in, "-o", temp_out]
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            res = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=15)
             if res.returncode == 0 and os.path.exists(temp_out):
                 with open(temp_out, "r", encoding="utf-8") as f_out:
                     compiled_mlog = f_out.read()
                 return True, compiled_mlog
             else:
                 return False, f"Ошибка компиляции jar:\n{res.stderr or res.stdout}"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return False, str(e)
         finally:
             if os.path.exists(temp_in):

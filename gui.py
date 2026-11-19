@@ -1,42 +1,41 @@
-"""
-Mindcode Image Converter - Graphic User Interface (GUI)
+"""Mindcode Image Converter - Graphic User Interface (GUI).
+
 Современный минималистичный интерфейс на чистом Tkinter для Mindustry 160.7.
+Включает встроенную компиляцию в MLOG для прямой вставки в игровой процессор.
 Поддерживает нарезку кода на несколько процессоров для сложных изображений.
 """
 
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from typing import Optional, List
 
 from PIL import Image, ImageTk
 
-from converter import ConverterService, ConversionResult, ProcessorCode, DISPLAYS
-
+from converter import ConversionResult, ConverterService, ProcessorCode
 
 # ─── Цветовая палитра: Modern Dark ───────────────────────────────────────────
-C_BG_ROOT       = "#0f0f12"
-C_BG_CARD       = "#18181c"
-C_BG_INPUT      = "#222228"
-C_BORDER        = "#2b2b32"
-C_TEXT_PRIMARY  = "#ffffff"
-C_TEXT_MUTED    = "#9e9ea8"
+C_BG_ROOT = "#0f0f12"
+C_BG_CARD = "#18181c"
+C_BG_INPUT = "#222228"
+C_BORDER = "#2b2b32"
+C_TEXT_PRIMARY = "#ffffff"
+C_TEXT_MUTED = "#9e9ea8"
 
-C_ACCENT_BLUE      = "#3b82f6"
-C_ACCENT_BLUE_HVR  = "#2563eb"
-C_ACCENT_GREEN     = "#10b981"
+C_ACCENT_BLUE = "#3b82f6"
+C_ACCENT_BLUE_HVR = "#2563eb"
+C_ACCENT_GREEN = "#10b981"
 C_ACCENT_GREEN_HVR = "#059669"
-C_ACCENT_ORANGE    = "#f59e0b"
-C_ACCENT_ORANGE_HVR= "#d97706"
+C_ACCENT_ORANGE = "#f59e0b"
+C_ACCENT_ORANGE_HVR = "#d97706"
 
-C_BADGE_OK_BG   = "#064e3b"
-C_BADGE_OK_FG   = "#34d399"
-C_BADGE_ERR_BG  = "#7f1d1d"
-C_BADGE_ERR_FG  = "#f87171"
+C_BADGE_OK_BG = "#064e3b"
+C_BADGE_OK_FG = "#34d399"
+C_BADGE_ERR_BG = "#7f1d1d"
+C_BADGE_ERR_FG = "#f87171"
 C_BADGE_INFO_BG = "#1e3a5f"
 C_BADGE_INFO_FG = "#60a5fa"
-C_BADGE_MULTI_BG= "#3b1f5e"
-C_BADGE_MULTI_FG= "#c084fc"
+C_BADGE_MULTI_BG = "#3b1f5e"
+C_BADGE_MULTI_FG = "#c084fc"
 
 
 class ModernButton(tk.Button):
@@ -53,14 +52,14 @@ class ModernButton(tk.Button):
             font=("Segoe UI", 9, "bold"),
             padx=12,
             pady=7,
-            **kwargs
+            **kwargs,
         )
         self.default_bg = bg
         self.hvr_bg = hvr_bg
-        self.bind("<Enter>", lambda e: self.configure(bg=self.hvr_bg))
-        self.bind("<Leave>", lambda e: self.configure(bg=self.default_bg))
+        self.bind("<Enter>", lambda _e: self.configure(bg=self.hvr_bg))
+        self.bind("<Leave>", lambda _e: self.configure(bg=self.default_bg))
 
-    def set_color(self, bg, hvr_bg):
+    def set_color(self, bg: str, hvr_bg: str):
         self.default_bg = bg
         self.hvr_bg = hvr_bg
         self.configure(bg=bg, activebackground=hvr_bg)
@@ -68,121 +67,61 @@ class ModernButton(tk.Button):
 
 class SegmentedControl(tk.Frame):
     def __init__(self, master, options, default_value, on_change=None):
-        super().__init__(master, bg=C_BG_INPUT, padx=2, pady=2,
-                         highlightthickness=1, highlightbackground=C_BORDER)
+        super().__init__(
+            master,
+            bg=C_BG_INPUT,
+            padx=2,
+            pady=2,
+            highlightthickness=1,
+            highlightbackground=C_BORDER,
+        )
         self.on_change = on_change
         self.current_value = default_value
         self.buttons = {}
 
         for val, label in options:
             btn = tk.Button(
-                self, text=label, relief="flat", bd=0, cursor="hand2",
-                font=("Segoe UI", 8, "bold"), padx=8, pady=4,
-                command=lambda v=val: self.select(v)
+                self,
+                text=label,
+                relief="flat",
+                bd=0,
+                cursor="hand2",
+                font=("Segoe UI", 8, "bold"),
+                padx=8,
+                pady=4,
+                command=lambda v=val: self.select(v),
             )
             btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=1)
             self.buttons[val] = btn
 
         self._update_appearance()
 
-    def select(self, value, notify=True):
+    def select(self, value):
         if self.current_value != value:
             self.current_value = value
             self._update_appearance()
-            if notify and self.on_change:
+            if self.on_change:
                 self.on_change(value)
 
     def _update_appearance(self):
         for val, btn in self.buttons.items():
             if val == self.current_value:
-                btn.configure(bg=C_ACCENT_BLUE, fg="#ffffff",
-                              activebackground=C_ACCENT_BLUE_HVR, activeforeground="#ffffff")
+                btn.configure(
+                    bg=C_ACCENT_BLUE,
+                    fg="#ffffff",
+                    activebackground=C_ACCENT_BLUE_HVR,
+                    activeforeground="#ffffff",
+                )
             else:
-                btn.configure(bg=C_BG_INPUT, fg=C_TEXT_MUTED,
-                              activebackground="#2c2c34", activeforeground=C_TEXT_PRIMARY)
+                btn.configure(
+                    bg=C_BG_INPUT,
+                    fg=C_TEXT_MUTED,
+                    activebackground="#2c2c34",
+                    activeforeground=C_TEXT_PRIMARY,
+                )
 
     def get(self):
         return self.current_value
-
-
-class ScrollableRow(tk.Frame):
-    """Строка элементов с горизонтальной прокруткой.
-
-    Скроллбар показывается только когда содержимое шире панели, а колесо мыши
-    прокручивает ряд влево/вправо (вертикальное колесо тоже работает).
-    """
-
-    def __init__(self, master, height=30):
-        super().__init__(master, bg=C_BG_CARD)
-        self.grid_columnconfigure(0, weight=1)
-
-        self.canvas = tk.Canvas(
-            self, bg=C_BG_CARD, highlightthickness=0, bd=0, height=height
-        )
-        self.canvas.grid(row=0, column=0, sticky="ew")
-
-        self.scrollbar = tk.Scrollbar(
-            self, orient=tk.HORIZONTAL, command=self.canvas.xview,
-            bg=C_BG_INPUT, troughcolor=C_BG_ROOT, bd=0,
-            highlightthickness=0, activebackground=C_ACCENT_BLUE
-        )
-        self.canvas.configure(xscrollcommand=self.scrollbar.set)
-        self.scrollbar.grid(row=1, column=0, sticky="ew")
-        self.scrollbar.grid_remove()
-
-        self.inner = tk.Frame(self.canvas, bg=C_BG_CARD)
-        self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
-
-        self.inner.bind("<Configure>", self._on_inner_configure)
-        self.canvas.bind("<Configure>", self._on_canvas_configure)
-        for widget in (self.canvas, self.inner):
-            self._bind_wheel(widget)
-
-    def add(self, widget, **pack_options):
-        """Добавляет элемент в ряд и включает для него прокрутку колесом."""
-        widget.pack(**pack_options)
-        self._bind_wheel(widget)
-
-    def clear(self):
-        for widget in self.inner.winfo_children():
-            widget.destroy()
-
-    def reset_view(self):
-        self.canvas.xview_moveto(0)
-
-    def _bind_wheel(self, widget):
-        widget.bind("<MouseWheel>", self._on_wheel)
-        widget.bind("<Button-4>", self._on_wheel)
-        widget.bind("<Button-5>", self._on_wheel)
-
-    def _on_inner_configure(self, _event=None):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        # Подстраиваем высоту под кнопки (важно при другом DPI/масштабе шрифта).
-        req_h = self.inner.winfo_reqheight()
-        if req_h > 1 and int(self.canvas.cget("height")) != req_h:
-            self.canvas.configure(height=req_h)
-        self._sync_scrollbar()
-
-    def _on_canvas_configure(self, _event=None):
-        self._sync_scrollbar()
-
-    def _sync_scrollbar(self):
-        bbox = self.canvas.bbox("all")
-        needed = bbox is not None and bbox[2] > self.canvas.winfo_width() + 1
-        if needed:
-            self.scrollbar.grid()
-        else:
-            self.scrollbar.grid_remove()
-            self.canvas.xview_moveto(0)
-
-    def _on_wheel(self, event):
-        if getattr(event, "num", None) == 4:
-            step = -2
-        elif getattr(event, "num", None) == 5:
-            step = 2
-        else:
-            step = -2 if getattr(event, "delta", 0) > 0 else 2
-        self.canvas.xview_scroll(step, "units")
 
 
 class AppGUI(tk.Tk):
@@ -195,47 +134,78 @@ class AppGUI(tk.Tk):
         self.configure(bg=C_BG_ROOT)
 
         # ── Состояние ────────────────────────────────────────────────────────
-        self.current_image_path: Optional[str] = None
-        self.current_result: Optional[ConversionResult] = None
-        self.tk_orig_image: Optional[ImageTk.PhotoImage] = None
-        self.tk_preview_image: Optional[ImageTk.PhotoImage] = None
+        self.current_image_path: str | None = None
+        self.current_result: ConversionResult | None = None
+        self.tk_orig_image: ImageTk.PhotoImage | None = None
+        self.tk_preview_image: ImageTk.PhotoImage | None = None
 
-        self.display_mode   = "small"
+        self.display_mode = "small"
         self.processor_mode = "multi"   # "multi" | "single" | "world"
-        self.aspect_mode    = "fit"
-        self.num_colors     = 12
-        self.dither         = False
-        self.current_tab    = "preview"
+        self.aspect_mode = "fit"
+        self.num_colors = 12
+        self.dither = False
+        self.current_tab = "preview"    # "preview" | "mlog" | "mindcode"
 
-        # мульти-процессор: выбранный процессор для просмотра/копирования
-        self.selected_proc_idx = 0   # индекс в res.processors
+        # Индекс выбранного процессора (0..N-1 или -1 для "Все вместе")
+        self.selected_proc_idx = 0
 
         self._build_layout()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Построение UI
+    # Построение интерфейса
     # ─────────────────────────────────────────────────────────────────────────
 
     def _build_layout(self):
         # 1. Хедер
-        header = tk.Frame(self, bg=C_BG_CARD, padx=16, pady=10,
-                          highlightthickness=1, highlightbackground=C_BORDER)
+        header = tk.Frame(
+            self,
+            bg=C_BG_CARD,
+            padx=16,
+            pady=10,
+            highlightthickness=1,
+            highlightbackground=C_BORDER,
+        )
         header.pack(fill=tk.X, side=tk.TOP)
 
-        tk.Label(header, text="Mindcode Image Converter",
-                 font=("Segoe UI", 12, "bold"), fg=C_TEXT_PRIMARY, bg=C_BG_CARD).pack(side=tk.LEFT)
-        tk.Label(header, text="генератор и компилятор графики для Mindustry release build 160.7",
-                 font=("Segoe UI", 9), fg=C_TEXT_MUTED, bg=C_BG_CARD).pack(side=tk.LEFT, padx=(10, 0), pady=(2, 0))
-        tk.Label(header, text="v160.7 | Multi-Proc Ready",
-                 font=("Segoe UI", 8, "bold"), fg="#34d399", bg="#064e3b", padx=8, pady=3).pack(side=tk.RIGHT)
+        tk.Label(
+            header,
+            text="Mindcode Image Converter",
+            font=("Segoe UI", 12, "bold"),
+            fg=C_TEXT_PRIMARY,
+            bg=C_BG_CARD,
+        ).pack(side=tk.LEFT)
 
-        # 2. Футер (строится раньше тела, чтобы pack(BOTTOM) работал)
-        self.footer = tk.Frame(self, bg=C_BG_CARD, padx=14, pady=8,
-                               highlightthickness=1, highlightbackground=C_BORDER)
+        tk.Label(
+            header,
+            text="генератор и компилятор графики для Mindustry release build 160.7",
+            font=("Segoe UI", 9),
+            fg=C_TEXT_MUTED,
+            bg=C_BG_CARD,
+        ).pack(side=tk.LEFT, padx=(10, 0), pady=(2, 0))
+
+        tk.Label(
+            header,
+            text="v160.7 | Multi-Proc Ready",
+            font=("Segoe UI", 8, "bold"),
+            fg="#34d399",
+            bg="#064e3b",
+            padx=8,
+            pady=3,
+        ).pack(side=tk.RIGHT)
+
+        # 2. Футер (строим раньше тела, чтобы pack(BOTTOM) работал надежно)
+        self.footer = tk.Frame(
+            self,
+            bg=C_BG_CARD,
+            padx=14,
+            pady=8,
+            highlightthickness=1,
+            highlightbackground=C_BORDER,
+        )
         self.footer.pack(fill=tk.X, side=tk.BOTTOM)
         self._build_footer()
 
-        # 3. Тело
+        # 3. Тело приложения
         body = tk.Frame(self, bg=C_BG_ROOT, padx=10, pady=10)
         body.pack(fill=tk.BOTH, expand=True)
 
@@ -249,24 +219,26 @@ class AppGUI(tk.Tk):
         self._build_sidebar(sidebar)
         self._build_main_area()
 
-        # Всплывающее уведомление (не занимает места в layout)
-        self._notice_after_id = None
-        self.lbl_notice = tk.Label(
-            self, text="", font=("Segoe UI", 9, "bold"),
-            bg=C_BADGE_OK_BG, fg=C_BADGE_OK_FG,
-            padx=12, pady=5, bd=0,
-            highlightthickness=1, highlightbackground="#065f46"
-        )
-
     def _build_sidebar(self, parent):
-        # ── Карточка: Файл ───────────────────────────────────────────────────
+        # ── Карточка: Изображение ────────────────────────────────────────────
         card_file = self._create_card(parent, "ИЗОБРАЖЕНИЕ")
-        ModernButton(card_file, text="📂 Загрузить файл...",
-                     bg=C_ACCENT_BLUE, hvr_bg=C_ACCENT_BLUE_HVR,
-                     command=self._on_select_file).pack(fill=tk.X, pady=(0, 6))
-        self.lbl_file_name = tk.Label(card_file, text="Файл не выбран",
-                                      font=("Segoe UI", 8), fg=C_TEXT_MUTED, bg=C_BG_CARD,
-                                      wraplength=280, justify=tk.LEFT)
+        ModernButton(
+            card_file,
+            text="📂 Загрузить файл...",
+            bg=C_ACCENT_BLUE,
+            hvr_bg=C_ACCENT_BLUE_HVR,
+            command=self._on_select_file,
+        ).pack(fill=tk.X, pady=(0, 6))
+
+        self.lbl_file_name = tk.Label(
+            card_file,
+            text="Файл не выбран",
+            font=("Segoe UI", 8),
+            fg=C_TEXT_MUTED,
+            bg=C_BG_CARD,
+            wraplength=280,
+            justify=tk.LEFT,
+        )
         self.lbl_file_name.pack(anchor="w")
 
         # ── Карточка: Mindustry параметры ────────────────────────────────────
@@ -276,26 +248,41 @@ class AppGUI(tk.Tk):
         self.seg_display = SegmentedControl(
             card_mind,
             [("small", "80×80 (Logic)"), ("large", "176×176 (Large)")],
-            "small", on_change=self._on_display_changed
+            "small",
+            on_change=self._on_display_changed,
         )
         self.seg_display.pack(fill=tk.X, pady=(0, 8))
 
-        self._create_field_label(card_mind, "Режим нарезки:")
+        self._create_field_label(card_mind, "Режим процессора:")
         self.seg_proc = SegmentedControl(
             card_mind,
             [("multi", "Мульти-проц"), ("single", "1 проц (≤1000)"), ("world", "World")],
-            "multi", on_change=self._on_proc_changed
+            "multi",
+            on_change=self._on_proc_changed,
         )
         self.seg_proc.pack(fill=tk.X, pady=(0, 8))
 
         row_name = tk.Frame(card_mind, bg=C_BG_CARD)
         row_name.pack(fill=tk.X, pady=(0, 2))
-        tk.Label(row_name, text="Имя дисплея в игре:", font=("Segoe UI", 9),
-                 fg=C_TEXT_MUTED, bg=C_BG_CARD).pack(side=tk.LEFT)
+        tk.Label(
+            row_name,
+            text="Имя дисплея в игре:",
+            font=("Segoe UI", 9),
+            fg=C_TEXT_MUTED,
+            bg=C_BG_CARD,
+        ).pack(side=tk.LEFT)
+
         self.entry_target = tk.Entry(
-            row_name, bg=C_BG_INPUT, fg=C_TEXT_PRIMARY, insertbackground=C_TEXT_PRIMARY,
-            relief="flat", font=("Segoe UI", 9), highlightthickness=1,
-            highlightbackground=C_BORDER, width=10, justify=tk.CENTER
+            row_name,
+            bg=C_BG_INPUT,
+            fg=C_TEXT_PRIMARY,
+            insertbackground=C_TEXT_PRIMARY,
+            relief="flat",
+            font=("Segoe UI", 9),
+            highlightthickness=1,
+            highlightbackground=C_BORDER,
+            width=10,
+            justify=tk.CENTER,
         )
         self.entry_target.insert(0, "display1")
         self.entry_target.pack(side=tk.RIGHT)
@@ -307,43 +294,77 @@ class AppGUI(tk.Tk):
         self.seg_aspect = SegmentedControl(
             card_gfx,
             [("fit", "Вписать"), ("fill", "Заполнить"), ("stretch", "Растянуть")],
-            "fit", on_change=self._on_aspect_changed
+            "fit",
+            on_change=self._on_aspect_changed,
         )
         self.seg_aspect.pack(fill=tk.X, pady=(0, 8))
 
         row_slider_head = tk.Frame(card_gfx, bg=C_BG_CARD)
         row_slider_head.pack(fill=tk.X, pady=(0, 2))
-        tk.Label(row_slider_head, text="Цветов в палитре:", font=("Segoe UI", 9),
-                 fg=C_TEXT_MUTED, bg=C_BG_CARD).pack(side=tk.LEFT)
-        self.lbl_colors_val = tk.Label(row_slider_head, text="12",
-                                       font=("Segoe UI", 9, "bold"), fg=C_ACCENT_BLUE, bg=C_BG_CARD)
+        tk.Label(
+            row_slider_head,
+            text="Цветов в палитре:",
+            font=("Segoe UI", 9),
+            fg=C_TEXT_MUTED,
+            bg=C_BG_CARD,
+        ).pack(side=tk.LEFT)
+        self.lbl_colors_val = tk.Label(
+            row_slider_head,
+            text="12",
+            font=("Segoe UI", 9, "bold"),
+            fg=C_ACCENT_BLUE,
+            bg=C_BG_CARD,
+        )
         self.lbl_colors_val.pack(side=tk.RIGHT)
 
         self.slider_colors = tk.Scale(
-            card_gfx, from_=2, to=32, orient=tk.HORIZONTAL,
-            bg=C_BG_CARD, fg=C_TEXT_PRIMARY, troughcolor=C_BG_INPUT,
-            highlightthickness=0, bd=0, activebackground=C_ACCENT_BLUE,
-            showvalue=False, command=self._on_slider_change
+            card_gfx,
+            from_=2,
+            to=32,
+            orient=tk.HORIZONTAL,
+            bg=C_BG_CARD,
+            fg=C_TEXT_PRIMARY,
+            troughcolor=C_BG_INPUT,
+            highlightthickness=0,
+            bd=0,
+            activebackground=C_ACCENT_BLUE,
+            showvalue=False,
+            command=self._on_slider_change,
         )
         self.slider_colors.set(12)
         self.slider_colors.pack(fill=tk.X, pady=(0, 8))
 
         self.dither_var = tk.BooleanVar(value=False)
         tk.Checkbutton(
-            card_gfx, text="Сглаживание (Floyd-Steinberg)",
-            variable=self.dither_var, bg=C_BG_CARD, fg=C_TEXT_PRIMARY,
-            selectcolor=C_BG_INPUT, activebackground=C_BG_CARD,
-            activeforeground=C_TEXT_PRIMARY, highlightthickness=0,
-            font=("Segoe UI", 9), command=self._on_dither_toggle
+            card_gfx,
+            text="Сглаживание (Floyd-Steinberg)",
+            variable=self.dither_var,
+            bg=C_BG_CARD,
+            fg=C_TEXT_PRIMARY,
+            selectcolor=C_BG_INPUT,
+            activebackground=C_BG_CARD,
+            activeforeground=C_TEXT_PRIMARY,
+            highlightthickness=0,
+            font=("Segoe UI", 9),
+            command=self._on_dither_toggle,
         ).pack(anchor="w", pady=(0, 4))
 
         # ── Кнопки действий ──────────────────────────────────────────────────
-        ModernButton(parent, text="🚀 Авто-подгон под 1000 строк",
-                     bg=C_ACCENT_GREEN, hvr_bg=C_ACCENT_GREEN_HVR,
-                     command=self._on_auto_fit).pack(fill=tk.X, pady=(0, 6))
-        ModernButton(parent, text="⚡ Пересчитать",
-                     bg=C_BG_INPUT, hvr_bg="#2c2c34",
-                     command=self._run_conversion).pack(fill=tk.X)
+        ModernButton(
+            parent,
+            text="🚀 Авто-подгон под 1000 строк",
+            bg=C_ACCENT_GREEN,
+            hvr_bg=C_ACCENT_GREEN_HVR,
+            command=self._on_auto_fit,
+        ).pack(fill=tk.X, pady=(0, 6))
+
+        ModernButton(
+            parent,
+            text="⚡ Пересчитать",
+            bg=C_BG_INPUT,
+            hvr_bg="#2c2c34",
+            command=self._run_conversion,
+        ).pack(fill=tk.X)
 
     def _build_main_area(self):
         # ── Таб-бар ──────────────────────────────────────────────────────────
@@ -351,141 +372,297 @@ class AppGUI(tk.Tk):
         tab_bar.pack(fill=tk.X, pady=(0, 8))
 
         self.btn_tab_prev = ModernButton(
-            tab_bar, text="🖼️ Предпросмотр",
-            bg=C_ACCENT_BLUE, hvr_bg=C_ACCENT_BLUE_HVR,
-            command=lambda: self._switch_tab("preview")
+            tab_bar,
+            text="🖼️ Предпросмотр",
+            bg=C_ACCENT_BLUE,
+            hvr_bg=C_ACCENT_BLUE_HVR,
+            command=lambda: self._switch_tab("preview"),
         )
         self.btn_tab_prev.pack(side=tk.LEFT, padx=(0, 6))
 
         self.btn_tab_mlog = ModernButton(
-            tab_bar, text="⚡ MLOG (в процессор)",
-            bg=C_BG_CARD, hvr_bg="#24242c", fg=C_TEXT_MUTED,
-            command=lambda: self._switch_tab("mlog")
+            tab_bar,
+            text="⚡ MLOG (в процессор)",
+            bg=C_BG_CARD,
+            hvr_bg="#24242c",
+            fg=C_TEXT_MUTED,
+            command=lambda: self._switch_tab("mlog"),
         )
         self.btn_tab_mlog.pack(side=tk.LEFT, padx=(0, 6))
 
         self.btn_tab_mind = ModernButton(
-            tab_bar, text="📜 Mindcode (.mnd)",
-            bg=C_BG_CARD, hvr_bg="#24242c", fg=C_TEXT_MUTED,
-            command=lambda: self._switch_tab("mindcode")
+            tab_bar,
+            text="📜 Mindcode (.mnd)",
+            bg=C_BG_CARD,
+            hvr_bg="#24242c",
+            fg=C_TEXT_MUTED,
+            command=lambda: self._switch_tab("mindcode"),
         )
         self.btn_tab_mind.pack(side=tk.LEFT)
 
+        self.btn_tab_schem = ModernButton(
+            tab_bar,
+            text="📦 Схема (.msch)",
+            bg=C_BG_CARD,
+            hvr_bg="#24242c",
+            fg=C_TEXT_MUTED,
+            command=lambda: self._switch_tab("schematic"),
+        )
+        self.btn_tab_schem.pack(side=tk.LEFT, padx=(6, 0))
+
         # ── Контейнер вкладок ────────────────────────────────────────────────
-        self.view_container = tk.Frame(self.main_area, bg=C_BG_CARD,
-                                       highlightthickness=1, highlightbackground=C_BORDER)
+        self.view_container = tk.Frame(
+            self.main_area,
+            bg=C_BG_CARD,
+            highlightthickness=1,
+            highlightbackground=C_BORDER,
+        )
         self.view_container.pack(fill=tk.BOTH, expand=True)
 
         # Вкладка 1: Предпросмотр
         self.frame_preview = tk.Frame(self.view_container, bg=C_BG_CARD, padx=12, pady=12)
-        box_left = tk.Frame(self.frame_preview, bg=C_BG_ROOT,
-                            highlightthickness=1, highlightbackground=C_BORDER)
+
+        box_left = tk.Frame(
+            self.frame_preview,
+            bg=C_BG_ROOT,
+            highlightthickness=1,
+            highlightbackground=C_BORDER,
+        )
         box_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
-        tk.Label(box_left, text="Исходное изображение",
-                 font=("Segoe UI", 9, "bold"), fg=C_TEXT_MUTED, bg=C_BG_ROOT, pady=6).pack(side=tk.TOP, fill=tk.X)
+        tk.Label(
+            box_left,
+            text="Исходное изображение",
+            font=("Segoe UI", 9, "bold"),
+            fg=C_TEXT_MUTED,
+            bg=C_BG_ROOT,
+            pady=6,
+        ).pack(side=tk.TOP, fill=tk.X)
         self.canvas_orig = tk.Canvas(box_left, bg="#121216", highlightthickness=0)
         self.canvas_orig.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
 
-        box_right = tk.Frame(self.frame_preview, bg=C_BG_ROOT,
-                             highlightthickness=1, highlightbackground=C_BORDER)
+        box_right = tk.Frame(
+            self.frame_preview,
+            bg=C_BG_ROOT,
+            highlightthickness=1,
+            highlightbackground=C_BORDER,
+        )
         box_right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(6, 0))
-        tk.Label(box_right, text="Экран в Mindustry (пиксельный вид)",
-                 font=("Segoe UI", 9, "bold"), fg=C_TEXT_MUTED, bg=C_BG_ROOT, pady=6).pack(side=tk.TOP, fill=tk.X)
+        tk.Label(
+            box_right,
+            text="Экран в Mindustry (пиксельный вид)",
+            font=("Segoe UI", 9, "bold"),
+            fg=C_TEXT_MUTED,
+            bg=C_BG_ROOT,
+            pady=6,
+        ).pack(side=tk.TOP, fill=tk.X)
         self.canvas_disp = tk.Canvas(box_right, bg="#121216", highlightthickness=0)
         self.canvas_disp.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
 
         # Вкладка 2: MLOG
         self.frame_mlog = tk.Frame(self.view_container, bg=C_BG_CARD, padx=10, pady=10)
-        # Верхняя панель: пояснение + выбор процессора
+
         mlog_top = tk.Frame(self.frame_mlog, bg=C_BG_CARD)
-        mlog_top.pack(fill=tk.X, pady=(0, 6))
+        mlog_top.pack(fill=tk.X, pady=(0, 4))
         self.lbl_mlog_hint = tk.Label(
             mlog_top,
-            text="Вставьте этот код в процессор Mindustry через кнопку «Вставить из буфера» (Ctrl+V)",
-            font=("Segoe UI", 8), fg="#34d399", bg=C_BG_CARD
+            text="Вставьте этот код в процессор через «Вставить из буфера» (Ctrl+V)",
+            font=("Segoe UI", 8),
+            fg="#34d399",
+            bg=C_BG_CARD,
         )
         self.lbl_mlog_hint.pack(side=tk.LEFT, anchor="w")
-        # Панель кнопок выбора процессора (строится динамически в _rebuild_proc_tabs)
-        self.proc_bar_mlog, self.proc_scroll_mlog = self._create_proc_bar(self.frame_mlog)
-        self.text_mlog_container, self.text_mlog = self._create_text_editor(self.frame_mlog)
+
+        self.proc_tab_bar_mlog = tk.Frame(self.frame_mlog, bg=C_BG_CARD)
+        self.proc_tab_bar_mlog.pack(fill=tk.X, pady=(0, 4))
+        self.text_mlog = self._create_text_editor(self.frame_mlog)
 
         # Вкладка 3: Mindcode
         self.frame_mindcode = tk.Frame(self.view_container, bg=C_BG_CARD, padx=10, pady=10)
-        tk.Label(
-            self.frame_mindcode,
+
+        mind_top = tk.Frame(self.frame_mindcode, bg=C_BG_CARD)
+        mind_top.pack(fill=tk.X, pady=(0, 4))
+        self.lbl_mind_hint = tk.Label(
+            mind_top,
             text="Исходный код на языке Mindcode (валидный синтаксис: clear, color, rect, drawflush, stop)",
-            font=("Segoe UI", 8), fg="#60a5fa", bg=C_BG_CARD
-        ).pack(anchor="w", pady=(0, 4))
-        # Панель кнопок выбора процессора для Mindcode
-        self.proc_bar_mind, self.proc_scroll_mind = self._create_proc_bar(self.frame_mindcode)
-        self.text_mindcode_container, self.text_mindcode = self._create_text_editor(self.frame_mindcode)
+            font=("Segoe UI", 8),
+            fg="#60a5fa",
+            bg=C_BG_CARD,
+        )
+        self.lbl_mind_hint.pack(side=tk.LEFT, anchor="w")
+
+        self.proc_tab_bar_mind = tk.Frame(self.frame_mindcode, bg=C_BG_CARD)
+        self.proc_tab_bar_mind.pack(fill=tk.X, pady=(0, 4))
+        self.text_mindcode = self._create_text_editor(self.frame_mindcode)
+
+        # Вкладка 4: Схема (.msch)
+        self.frame_schematic = tk.Frame(self.view_container, bg=C_BG_CARD, padx=10, pady=10)
+
+        schem_top = tk.Frame(self.frame_schematic, bg=C_BG_CARD)
+        schem_top.pack(fill=tk.X, pady=(0, 4))
+        self.lbl_schem_hint = tk.Label(
+            schem_top,
+            text="Готовая схема Mindustry: дисплей + все процессоры с предзагруженным MLOG кодом и связями",
+            font=("Segoe UI", 8),
+            fg="#c084fc",
+            bg=C_BG_CARD,
+        )
+        self.lbl_schem_hint.pack(side=tk.LEFT, anchor="w")
+
+        schem_action_bar = tk.Frame(self.frame_schematic, bg=C_BG_CARD)
+        schem_action_bar.pack(fill=tk.X, pady=(0, 6))
+
+        self.btn_schem_tab_copy = ModernButton(
+            schem_action_bar,
+            text="📦 Скопировать схему в буфер",
+            bg=C_ACCENT_ORANGE,
+            hvr_bg=C_ACCENT_ORANGE_HVR,
+            command=self._on_copy_schematic,
+        )
+        self.btn_schem_tab_copy.pack(side=tk.LEFT, padx=(0, 6))
+
+        ModernButton(
+            schem_action_bar,
+            text="💾 Сохранить .msch файл",
+            bg=C_BG_INPUT,
+            hvr_bg="#2c2c34",
+            command=self._on_save_schematic,
+        ).pack(side=tk.LEFT)
+
+        self.lbl_schem_info = tk.Label(
+            schem_action_bar,
+            text="",
+            font=("Segoe UI", 9, "bold"),
+            fg=C_TEXT_PRIMARY,
+            bg=C_BG_CARD,
+        )
+        self.lbl_schem_info.pack(side=tk.RIGHT)
+
+        self.text_schematic = self._create_text_editor(self.frame_schematic)
 
         self.frame_preview.pack(fill=tk.BOTH, expand=True)
-
-    def _create_proc_bar(self, parent):
-        """Создаёт (но не упаковывает) подпись и прокручиваемый ряд процессоров."""
-        bar = tk.Frame(parent, bg=C_BG_CARD)
-        tk.Label(bar, text="Процессор:", font=("Segoe UI", 8),
-                 fg=C_TEXT_MUTED, bg=C_BG_CARD).pack(side=tk.LEFT, padx=(0, 6))
-        row = ScrollableRow(bar)
-        row.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        return bar, row
 
     def _create_text_editor(self, parent):
         container = tk.Frame(parent, bg=C_BG_CARD)
         container.pack(fill=tk.BOTH, expand=True)
+
         txt = tk.Text(
-            container, bg="#111115", fg="#e4e4e7",
-            insertbackground="#ffffff", font=("Consolas", 10),
-            relief="flat", bd=0, wrap=tk.NONE
+            container,
+            bg="#111115",
+            fg="#e4e4e7",
+            insertbackground="#ffffff",
+            font=("Consolas", 10),
+            relief="flat",
+            bd=0,
+            wrap=tk.NONE,
         )
         scroll_y = tk.Scrollbar(container, orient=tk.VERTICAL, command=txt.yview)
         scroll_x = tk.Scrollbar(container, orient=tk.HORIZONTAL, command=txt.xview)
         txt.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
         txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        return container, txt
+        return txt
 
     def _build_footer(self):
         left_box = tk.Frame(self.footer, bg=C_BG_CARD)
         left_box.pack(side=tk.LEFT, fill=tk.Y)
 
         self.badge_status = tk.Label(
-            left_box, text="Инструкций: — / 1000",
-            font=("Segoe UI", 9, "bold"), bg=C_BG_INPUT, fg=C_TEXT_MUTED, padx=10, pady=4
+            left_box,
+            text="Инструкций: — / 1000",
+            font=("Segoe UI", 9, "bold"),
+            bg=C_BG_INPUT,
+            fg=C_TEXT_MUTED,
+            padx=10,
+            pady=4,
         )
         self.badge_status.pack(side=tk.LEFT, padx=(0, 10))
 
         self.lbl_details = tk.Label(
-            left_box, text="Загрузите изображение для начала",
-            font=("Segoe UI", 9), fg=C_TEXT_MUTED, bg=C_BG_CARD
+            left_box,
+            text="Загрузите изображение для начала",
+            font=("Segoe UI", 9),
+            fg=C_TEXT_MUTED,
+            bg=C_BG_CARD,
         )
         self.lbl_details.pack(side=tk.LEFT)
 
         right_box = tk.Frame(self.footer, bg=C_BG_CARD)
         right_box.pack(side=tk.RIGHT)
 
-        ModernButton(right_box, text="💾 Сохранить все .mlog",
-                     bg=C_BG_INPUT, hvr_bg="#2c2c34",
-                     command=self._on_save_mlog).pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_save_mlog = ModernButton(
+            right_box,
+            text="💾 Сохранить .mlog",
+            bg=C_BG_INPUT,
+            hvr_bg="#2c2c34",
+            command=self._on_save_mlog,
+        )
+        self.btn_save_mlog.pack(side=tk.LEFT, padx=(0, 6))
 
-        ModernButton(right_box, text="📋 Скопировать Mindcode",
-                     bg=C_BG_INPUT, hvr_bg="#2c2c34",
-                     command=self._on_copy_mindcode).pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_copy_mind = ModernButton(
+            right_box,
+            text="📋 Скопировать Mindcode",
+            bg=C_BG_INPUT,
+            hvr_bg="#2c2c34",
+            command=self._on_copy_mindcode,
+        )
+        self.btn_copy_mind.pack(side=tk.LEFT, padx=(0, 6))
 
-        ModernButton(
-            right_box, text="⚡ Скопировать MLOG (для игры)",
-            bg=C_ACCENT_GREEN, hvr_bg=C_ACCENT_GREEN_HVR,
-            command=self._on_copy_mlog
-        ).pack(side=tk.LEFT)
+        self.btn_copy_mlog = ModernButton(
+            right_box,
+            text="⚡ Скопировать MLOG (для игры)",
+            bg=C_ACCENT_GREEN,
+            hvr_bg=C_ACCENT_GREEN_HVR,
+            command=self._on_copy_mlog,
+        )
+        self.btn_copy_mlog.pack(side=tk.LEFT)
+
+        self.btn_copy_schematic = ModernButton(
+            right_box,
+            text="📦 Скопировать схему (.msch)",
+            bg=C_ACCENT_ORANGE,
+            hvr_bg=C_ACCENT_ORANGE_HVR,
+            command=self._on_copy_schematic,
+        )
+        self.btn_copy_schematic.pack(side=tk.LEFT, padx=(6, 0))
+
+        self.btn_save_schematic = ModernButton(
+            right_box,
+            text="💾 Сохранить .msch",
+            bg=C_BG_INPUT,
+            hvr_bg="#2c2c34",
+            command=self._on_save_schematic,
+        )
+        self.btn_save_schematic.pack(side=tk.LEFT, padx=(6, 0))
+
+        self.btn_next_proc = ModernButton(
+            right_box,
+            text="▶ След. (#2)",
+            bg=C_BG_INPUT,
+            hvr_bg="#2c2c34",
+            command=self._on_next_proc,
+        )
+        # По умолчанию скрыта, отображается при наличии следующего процессора
+        self.btn_next_proc.pack_forget()
 
     def _create_card(self, parent, title):
-        card = tk.Frame(parent, bg=C_BG_CARD, padx=12, pady=10,
-                        highlightthickness=1, highlightbackground=C_BORDER)
+        card = tk.Frame(
+            parent,
+            bg=C_BG_CARD,
+            padx=12,
+            pady=10,
+            highlightthickness=1,
+            highlightbackground=C_BORDER,
+        )
         card.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(card, text=title, font=("Segoe UI", 8, "bold"),
-                 fg="#60a5fa", bg=C_BG_CARD).pack(anchor="w", pady=(0, 6))
+        tk.Label(
+            card,
+            text=title,
+            font=("Segoe UI", 8, "bold"),
+            fg="#60a5fa",
+            bg=C_BG_CARD,
+        ).pack(anchor="w", pady=(0, 6))
         return card
 
     def _create_field_label(self, parent, text):
@@ -494,73 +671,184 @@ class AppGUI(tk.Tk):
         return lbl
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Динамические кнопки выбора процессора
+    # Кнопки выбора процессора (мульти-процессор)
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _rebuild_proc_tabs(self, processors: List[ProcessorCode]):
-        """Перестраивает панели с кнопками выбора процессора на вкладках MLOG и Mindcode."""
-        self.proc_scroll_mlog.clear()
-        self.proc_scroll_mind.clear()
+    def _rebuild_proc_tabs(self, processors: list[ProcessorCode]):
+        """Перестраивает кнопки выбора процессоров в MLOG и Mindcode."""
+        for widget in self.proc_tab_bar_mlog.winfo_children():
+            widget.destroy()
+        for widget in self.proc_tab_bar_mind.winfo_children():
+            widget.destroy()
 
         n = len(processors)
         if n <= 1:
-            # одиночный процессор — панель не нужна
-            self.proc_bar_mlog.pack_forget()
-            self.proc_bar_mind.pack_forget()
+            self.proc_tab_bar_mlog.pack_forget()
+            self.proc_tab_bar_mind.pack_forget()
+            if hasattr(self, "btn_next_proc"):
+                self.btn_next_proc.pack_forget()
+            if hasattr(self, "btn_copy_mlog"):
+                self.btn_copy_mlog.configure(text="⚡ Скопировать MLOG (для игры)")
             return
 
-        # Ставим панели обратно перед редакторами (pack сохраняет порядок).
-        if not self.proc_bar_mlog.winfo_manager():
-            self.proc_bar_mlog.pack(fill=tk.X, pady=(0, 4), before=self.text_mlog_container)
-        if not self.proc_bar_mind.winfo_manager():
-            self.proc_bar_mind.pack(fill=tk.X, pady=(0, 4), before=self.text_mindcode_container)
+        self.proc_tab_bar_mlog.pack(fill=tk.X, pady=(0, 4))
+        self.proc_tab_bar_mind.pack(fill=tk.X, pady=(0, 4))
+
+        tk.Label(
+            self.proc_tab_bar_mlog,
+            text="Процессор:",
+            font=("Segoe UI", 8, "bold"),
+            fg=C_TEXT_MUTED,
+            bg=C_BG_CARD,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        tk.Label(
+            self.proc_tab_bar_mind,
+            text="Процессор:",
+            font=("Segoe UI", 8, "bold"),
+            fg=C_TEXT_MUTED,
+            bg=C_BG_CARD,
+        ).pack(side=tk.LEFT, padx=(0, 6))
 
         for p in processors:
             idx = p.index - 1
-            for row in (self.proc_scroll_mlog, self.proc_scroll_mind):
-                btn = tk.Button(
-                    row.inner, text=f"#{p.index} ({p.instruction_count}стр)",
-                    relief="flat", bd=0, cursor="hand2",
-                    font=("Segoe UI", 8, "bold"), padx=6, pady=3,
-                    command=lambda i=idx: self._select_proc(i)
-                )
-                row.add(btn, side=tk.LEFT, padx=(0, 3))
+            btn_mlog = tk.Button(
+                self.proc_tab_bar_mlog,
+                text=f"#{p.index} ({p.instruction_count} стр)",
+                relief="flat",
+                bd=0,
+                cursor="hand2",
+                font=("Segoe UI", 8, "bold"),
+                padx=6,
+                pady=3,
+                command=lambda i=idx: self._select_proc(i),
+            )
+            btn_mlog.pack(side=tk.LEFT, padx=(0, 4))
 
-        self.proc_scroll_mlog.reset_view()
-        self.proc_scroll_mind.reset_view()
+            btn_mind = tk.Button(
+                self.proc_tab_bar_mind,
+                text=f"#{p.index} ({p.instruction_count} стр)",
+                relief="flat",
+                bd=0,
+                cursor="hand2",
+                font=("Segoe UI", 8, "bold"),
+                padx=6,
+                pady=3,
+                command=lambda i=idx: self._select_proc(i),
+            )
+            btn_mind.pack(side=tk.LEFT, padx=(0, 4))
+
+        # Кнопка «Все вместе» (-1)
+        btn_all_mlog = tk.Button(
+            self.proc_tab_bar_mlog,
+            text="Все вместе",
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            font=("Segoe UI", 8, "bold"),
+            padx=6,
+            pady=3,
+            command=lambda: self._select_proc(-1),
+        )
+        btn_all_mlog.pack(side=tk.LEFT, padx=(4, 0))
+
+        btn_all_mind = tk.Button(
+            self.proc_tab_bar_mind,
+            text="Все вместе",
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            font=("Segoe UI", 8, "bold"),
+            padx=6,
+            pady=3,
+            command=lambda: self._select_proc(-1),
+        )
+        btn_all_mind.pack(side=tk.LEFT, padx=(4, 0))
+
         self._update_proc_tab_colors()
 
     def _update_proc_tab_colors(self):
-        """Подсвечивает выбранный процессор в панелях."""
-        for row in (self.proc_scroll_mlog, self.proc_scroll_mind):
-            buttons = [w for w in row.inner.winfo_children() if isinstance(w, tk.Button)]
+        """Подсвечивает выбранный процессор в панелях переключения."""
+        for bar in (self.proc_tab_bar_mlog, self.proc_tab_bar_mind):
+            buttons = [w for w in bar.winfo_children() if isinstance(w, tk.Button)]
+            # Последняя кнопка — «Все вместе» (соответствует idx == -1)
             for i, btn in enumerate(buttons):
-                if i == self.selected_proc_idx:
-                    btn.configure(bg=C_ACCENT_ORANGE, fg="#ffffff",
-                                  activebackground=C_ACCENT_ORANGE_HVR)
+                is_selected = (
+                    (self.selected_proc_idx == -1 and i == len(buttons) - 1)
+                    or (self.selected_proc_idx == i)
+                )
+                if is_selected:
+                    btn.configure(
+                        bg=C_ACCENT_ORANGE,
+                        fg="#ffffff",
+                        activebackground=C_ACCENT_ORANGE_HVR,
+                    )
                 else:
-                    btn.configure(bg=C_BG_INPUT, fg=C_TEXT_MUTED,
-                                  activebackground="#2c2c34")
+                    btn.configure(
+                        bg=C_BG_INPUT,
+                        fg=C_TEXT_MUTED,
+                        activebackground="#2c2c34",
+                    )
 
     def _select_proc(self, idx: int):
-        """Переключает отображаемый процессор."""
-        if not self.current_result or not self.current_result.processors:
+        """Переключает отображение на конкретный процессор или объединенный код."""
+        if not self.current_result:
             return
-        procs = self.current_result.processors
-        if idx < 0 or idx >= len(procs):
+        procs = self.current_result.processors or []
+        n = len(procs)
+
+        if idx != -1 and (idx < 0 or idx >= n):
             return
+
         self.selected_proc_idx = idx
         self._update_proc_tab_colors()
 
-        p = procs[idx]
         self.text_mlog.delete("1.0", tk.END)
-        self.text_mlog.insert("1.0", p.mlog)
         self.text_mindcode.delete("1.0", tk.END)
-        self.text_mindcode.insert("1.0", p.mindcode)
 
-        self.lbl_mlog_hint.configure(
-            text=f"Процессор {p.index} из {len(procs)}  •  {p.instruction_count} строк  •  {p.rect_count} прямоугольников"
-        )
+        if idx == -1 or n <= 1:
+            # Все процессоры вместе или единственный процессор
+            self.text_mlog.insert("1.0", self.current_result.mlog)
+            self.text_mindcode.insert("1.0", self.current_result.mindcode)
+
+            if n > 1:
+                self.lbl_mlog_hint.configure(
+                    text=f"Все {n} процессоров вместе  •  {self.current_result.estimated_instructions} строк суммарно  •  {len(self.current_result.rectangles)} прямоугольников"
+                )
+                self.btn_copy_mlog.configure(text=f"⚡ Скопировать все {n} проц.")
+            else:
+                self.lbl_mlog_hint.configure(
+                    text="Вставьте этот код в процессор через «Вставить из буфера» (Ctrl+V)"
+                )
+                self.btn_copy_mlog.configure(text="⚡ Скопировать MLOG (для игры)")
+
+            self.btn_next_proc.pack_forget()
+        else:
+            p = procs[idx]
+            self.text_mlog.insert("1.0", p.mlog)
+            self.text_mindcode.insert("1.0", p.mindcode)
+
+            self.lbl_mlog_hint.configure(
+                text=f"Процессор {p.index} из {n}  •  {p.instruction_count} строк  •  {p.rect_count} прямоугольников"
+            )
+            self.btn_copy_mlog.configure(text=f"⚡ Скопировать MLOG (Проц #{p.index} из {n})")
+
+            if idx < n - 1:
+                self.btn_next_proc.configure(text=f"▶ След. (#{p.index + 1})")
+                if not self.btn_next_proc.winfo_manager():
+                    self.btn_next_proc.pack(side=tk.LEFT, padx=(6, 0))
+            else:
+                self.btn_next_proc.pack_forget()
+
+    def _on_next_proc(self):
+        """Переход к следующему процессору по цепочке."""
+        if not self.current_result or not self.current_result.processors:
+            return
+        procs = self.current_result.processors
+        if self.selected_proc_idx == -1:
+            self._select_proc(0)
+        elif self.selected_proc_idx < len(procs) - 1:
+            self._select_proc(self.selected_proc_idx + 1)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Переключение вкладок
@@ -571,8 +859,9 @@ class AppGUI(tk.Tk):
         self.frame_preview.pack_forget()
         self.frame_mlog.pack_forget()
         self.frame_mindcode.pack_forget()
+        self.frame_schematic.pack_forget()
 
-        for btn in (self.btn_tab_prev, self.btn_tab_mlog, self.btn_tab_mind):
+        for btn in (self.btn_tab_prev, self.btn_tab_mlog, self.btn_tab_mind, self.btn_tab_schem):
             btn.set_color(C_BG_CARD, "#24242c")
             btn.configure(fg=C_TEXT_MUTED)
 
@@ -584,13 +873,17 @@ class AppGUI(tk.Tk):
             self.frame_mlog.pack(fill=tk.BOTH, expand=True)
             self.btn_tab_mlog.set_color(C_ACCENT_GREEN, C_ACCENT_GREEN_HVR)
             self.btn_tab_mlog.configure(fg="#ffffff")
-        else:
+        elif tab == "mindcode":
             self.frame_mindcode.pack(fill=tk.BOTH, expand=True)
             self.btn_tab_mind.set_color(C_ACCENT_BLUE, C_ACCENT_BLUE_HVR)
             self.btn_tab_mind.configure(fg="#ffffff")
+        elif tab == "schematic":
+            self.frame_schematic.pack(fill=tk.BOTH, expand=True)
+            self.btn_tab_schem.set_color(C_ACCENT_ORANGE, C_ACCENT_ORANGE_HVR)
+            self.btn_tab_schem.configure(fg="#ffffff")
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Обработчики событий
+    # Обработчики изменений параметров
     # ─────────────────────────────────────────────────────────────────────────
 
     def _on_display_changed(self, val):
@@ -617,7 +910,7 @@ class AppGUI(tk.Tk):
     def _on_select_file(self):
         filetypes = [
             ("Все поддерживаемые изображения", "*.png;*.jpg;*.jpeg;*.bmp;*.webp;*.gif"),
-            ("Все файлы", "*.*")
+            ("Все файлы", "*.*"),
         ]
         path = filedialog.askopenfilename(title="Выберите изображение", filetypes=filetypes)
         if path:
@@ -627,15 +920,17 @@ class AppGUI(tk.Tk):
                     w, h = img.size
                     name = os.path.basename(path)
                     self.lbl_file_name.configure(
-                        text=f"{name} ({w}×{h} px)", fg=C_TEXT_PRIMARY
+                        text=f"{name} ({w}×{h} px)",
+                        fg=C_TEXT_PRIMARY,
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 messagebox.showerror("Ошибка", f"Не удалось прочитать файл:\n{e}")
                 return
+
             self._run_conversion()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Конвертация
+    # Выполнение компиляции
     # ─────────────────────────────────────────────────────────────────────────
 
     def _run_conversion(self):
@@ -644,7 +939,6 @@ class AppGUI(tk.Tk):
 
         target_name = self.entry_target.get().strip() or "display1"
 
-        # Определяем параметры нарезки по режиму
         if self.processor_mode == "multi":
             split_processors = True
             instruction_limit = 1000
@@ -670,7 +964,7 @@ class AppGUI(tk.Tk):
             self.current_result = res
             self.selected_proc_idx = 0
             self._update_ui_state(res)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             messagebox.showerror("Ошибка конвертации", str(e))
 
     def _on_auto_fit(self):
@@ -690,98 +984,102 @@ class AppGUI(tk.Tk):
             )
             self.current_result = res
             self.selected_proc_idx = 0
-
-            # Авто-подгон всегда возвращает 1 процессор; держим значение
-            # в пределах диапазона слайдера (2–32).
-            self.num_colors = max(2, min(32, res.color_count))
-            self.slider_colors.set(self.num_colors)
-            self.lbl_colors_val.configure(text=str(self.num_colors))
+            self.num_colors = res.color_count
+            self.slider_colors.set(res.color_count)
+            self.lbl_colors_val.configure(text=str(res.color_count))
             self.dither = False
             self.dither_var.set(False)
 
-            # Переключить UI в режим single (авто-подгон всегда 1 процессор).
-            # notify=False обязателен: иначе select() запустит повторную
-            # конвертацию и затрёт только что найденный результат авто-подгона.
             self.processor_mode = "single"
-            self.seg_proc.select("single", notify=False)
+            self.seg_proc.select("single")
 
             self._update_ui_state(res)
             messagebox.showinfo(
                 "Авто-подгон завершен",
-                f"Параметры оптимизированы!\n\n"
+                f"Параметры оптимизированы под процессор Mindustry!\n\n"
                 f"Инструкций mlog: {res.estimated_instructions} (лимит 1000)\n"
-                f"Сетка: {res.grid_width}×{res.grid_height} | Цветов: {res.color_count}"
+                f"Сетка: {res.grid_width}×{res.grid_height} | Цветов: {res.color_count}",
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             messagebox.showerror("Ошибка", str(e))
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Обновление UI по результату
+    # Обновление состояния UI
     # ─────────────────────────────────────────────────────────────────────────
 
     def _update_ui_state(self, res: ConversionResult):
         procs = res.processors or []
         n = len(procs)
 
-        # ── Перестроить панели выбора процессора ─────────────────────────────
+        # Перестроить панели выбора процессоров
         self._rebuild_proc_tabs(procs)
 
-        # ── Заполнить редакторы ──────────────────────────────────────────────
-        # Показываем выбранный процессор (или единственный)
+        # Выбрать процессор и обновить текстовые поля
         if procs:
-            p = procs[self.selected_proc_idx]
-            self.text_mlog.delete("1.0", tk.END)
-            self.text_mlog.insert("1.0", p.mlog)
-            self.text_mindcode.delete("1.0", tk.END)
-            self.text_mindcode.insert("1.0", p.mindcode)
-
-            if n > 1:
-                self.lbl_mlog_hint.configure(
-                    text=f"Процессор {p.index} из {n}  •  {p.instruction_count} строк  •  {p.rect_count} прямоугольников"
-                )
-            else:
-                self.lbl_mlog_hint.configure(
-                    text="Вставьте этот код в процессор через кнопку «Вставить из буфера» (Ctrl+V)"
-                )
+            if self.selected_proc_idx >= n and self.selected_proc_idx != -1:
+                self.selected_proc_idx = 0
+            self._select_proc(self.selected_proc_idx)
         else:
             self.text_mlog.delete("1.0", tk.END)
             self.text_mlog.insert("1.0", res.mlog)
             self.text_mindcode.delete("1.0", tk.END)
             self.text_mindcode.insert("1.0", res.mindcode)
 
-        # ── Бейдж статуса ────────────────────────────────────────────────────
+        # Бейдж статуса
         inst = res.estimated_instructions
         if n > 1:
             self.badge_status.configure(
                 text=f"🔀 {n} процессоров  •  ~{inst} строк всего",
-                bg=C_BADGE_MULTI_BG, fg=C_BADGE_MULTI_FG
+                bg=C_BADGE_MULTI_BG,
+                fg=C_BADGE_MULTI_FG,
             )
         elif self.processor_mode == "world":
             self.badge_status.configure(
                 text=f"∞ {inst} строк (World Processor)",
-                bg=C_BADGE_INFO_BG, fg=C_BADGE_INFO_FG
+                bg=C_BADGE_INFO_BG,
+                fg=C_BADGE_INFO_FG,
             )
         elif inst <= 1000:
             self.badge_status.configure(
                 text=f"✔ {inst} / 1000 строк (ОК)",
-                bg=C_BADGE_OK_BG, fg=C_BADGE_OK_FG
+                bg=C_BADGE_OK_BG,
+                fg=C_BADGE_OK_FG,
             )
         else:
             self.badge_status.configure(
                 text=f"✖ {inst} / 1000 строк (Превышение!)",
-                bg=C_BADGE_ERR_BG, fg=C_BADGE_ERR_FG
+                bg=C_BADGE_ERR_BG,
+                fg=C_BADGE_ERR_FG,
             )
 
-        # ── Детали ───────────────────────────────────────────────────────────
+        # Строка деталей
+        extra = ""
+        if n > 1:
+            extra = f"  •  Процессоров: {n}"
+        elif self.processor_mode == "single" and inst > 1000:
+            extra = "  •  ⚠️ Выберите режим «Мульти-проц» или «Авто-подгон»"
+
         self.lbl_details.configure(
             text=(
                 f"Прямоугольников: {len(res.rectangles)}"
                 f"  •  Цветов: {res.color_count}"
                 f"  •  Фон: #{res.bg_color_hex}"
-                + (f"  •  Процессоров: {n}" if n > 1 else "")
+                + extra
             ),
-            fg=C_TEXT_MUTED
+            fg=C_TEXT_MUTED if (n > 1 or inst <= 1000) else C_BADGE_ERR_FG,
         )
+
+        # Обновить вкладку схемы и кнопки схемы
+        sr = self._build_schematic_result()
+        if sr:
+            self.text_schematic.delete("1.0", tk.END)
+            self.text_schematic.insert("1.0", sr.schematic_base64)
+            self.lbl_schem_info.configure(
+                text=f"Блоков: {sr.block_count}  •  Схема: {sr.layout_width}×{sr.layout_height}  •  {sr.processor_count} проц."
+            )
+            btn_txt = f"📦 Скопировать схему ({sr.processor_count} проц.)" if sr.processor_count > 1 else "📦 Скопировать схему"
+            self.btn_copy_schematic.configure(text=btn_txt)
+            self.btn_schem_tab_copy.configure(text=btn_txt)
 
         self._render_canvases(res)
 
@@ -806,35 +1104,16 @@ class AppGUI(tk.Tk):
         self.canvas_disp.create_image(cw // 2, ch // 2, image=self.tk_preview_image, anchor=tk.CENTER)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Кнопки копирования / сохранения
+    # Сохранение и буфер обмена
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _get_active_proc(self) -> Optional[ProcessorCode]:
-        """Возвращает выбранный процессор или None."""
+    def _get_active_proc(self) -> ProcessorCode | None:
         if not self.current_result:
             return None
         procs = self.current_result.processors
         if procs and 0 <= self.selected_proc_idx < len(procs):
             return procs[self.selected_proc_idx]
         return None
-
-    def _show_notice(self, text: str):
-        """Ненадолго показывает аккуратное уведомление над футером."""
-        if self._notice_after_id is not None:
-            self.after_cancel(self._notice_after_id)
-        self.lbl_notice.configure(text=text)
-        footer_h = self.footer.winfo_height()
-        if footer_h <= 1:
-            footer_h = 52
-        self.lbl_notice.place(
-            relx=1.0, rely=1.0, x=-18, y=-(footer_h + 10), anchor="se"
-        )
-        self.lbl_notice.lift()
-        self._notice_after_id = self.after(2200, self._hide_notice)
-
-    def _hide_notice(self):
-        self._notice_after_id = None
-        self.lbl_notice.place_forget()
 
     def _on_copy_mlog(self):
         if not self.current_result:
@@ -850,10 +1129,29 @@ class AppGUI(tk.Tk):
         self.update()
 
         if n > 1:
-            proc_num = (p.index if p else 1)
-            self._show_notice(f"✓ Скопирован MLOG процессора {proc_num} из {n}")
+            if self.selected_proc_idx == -1:
+                title = f"Скопированы все {n} процессоров"
+                msg = (
+                    f"Объединенный MLOG всех {n} процессоров скопирован в буфер!\n\n"
+                    "Обратите внимание: для работы в игре разделите код по процессорам."
+                )
+            else:
+                proc_num = p.index if p else 1
+                title = f"Процессор #{proc_num} из {n} скопирован"
+                msg = (
+                    f"MLOG процессора #{proc_num} скопирован в буфер!\n\n"
+                    f"1. Вставьте его в процессор #{proc_num} на карте;\n"
+                    f"2. Затем нажмите «▶ След. (#{proc_num + 1})» для копирования следующего."
+                )
+            messagebox.showinfo(title, msg)
         else:
-            self._show_notice("✓ MLOG скопирован в буфер")
+            messagebox.showinfo(
+                "Готово к игре!",
+                "MLOG скопирован в буфер обмена!\n\n"
+                "1. Откройте процессор в Mindustry;\n"
+                "2. Нажмите «Изменить»;\n"
+                "3. Нажмите «Вставить из буфера» (Ctrl+V).",
+            )
 
     def _on_copy_mindcode(self):
         if not self.current_result:
@@ -862,10 +1160,17 @@ class AppGUI(tk.Tk):
 
         p = self._get_active_proc()
         code = p.mindcode if p else self.current_result.mindcode
+        n = len(self.current_result.processors or [])
+
         self.clipboard_clear()
         self.clipboard_append(code)
         self.update()
-        self._show_notice("✓ Mindcode скопирован в буфер")
+
+        if n > 1 and self.selected_proc_idx != -1:
+            proc_num = p.index if p else 1
+            messagebox.showinfo("Скопировано", f"Mindcode процессора #{proc_num} скопирован в буфер обмена.")
+        else:
+            messagebox.showinfo("Скопировано", "Mindcode скопирован в буфер обмена.")
 
     def _on_save_mlog(self):
         if not self.current_result:
@@ -878,44 +1183,133 @@ class AppGUI(tk.Tk):
             base_name = os.path.splitext(os.path.basename(self.current_image_path))[0]
 
         if len(procs) <= 1:
-            # Одиночный файл
             path = filedialog.asksaveasfilename(
                 title="Сохранить MLOG",
                 initialfile=f"{base_name}.mlog",
-                filetypes=[("Mindustry Logic (*.mlog)", "*.mlog"),
-                           ("Текстовый файл", "*.txt"), ("Все файлы", "*.*")]
+                filetypes=[
+                    ("Mindustry Logic (*.mlog)", "*.mlog"),
+                    ("Текстовый файл", "*.txt"),
+                    ("Все файлы", "*.*"),
+                ],
             )
             if path:
                 mlog_text = procs[0].mlog if procs else self.current_result.mlog
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(mlog_text)
-                messagebox.showinfo("Готово", f"Файл сохранён:\n{path}")
+                messagebox.showinfo("Готово", f"Файл сохранен:\n{path}")
         else:
-            # Несколько файлов — выбираем папку
             folder = filedialog.askdirectory(title="Выберите папку для сохранения файлов процессоров")
             if folder:
                 saved = []
                 for p in procs:
-                    fname = f"{base_name}_proc{p.index}.mlog"
-                    fpath = os.path.join(folder, fname)
-                    with open(fpath, "w", encoding="utf-8") as f:
+                    fname_mlog = f"{base_name}_proc{p.index}.mlog"
+                    with open(os.path.join(folder, fname_mlog), "w", encoding="utf-8") as f:
                         f.write(p.mlog)
-                    saved.append(fname)
+                    saved.append(fname_mlog)
 
-                # Также сохраняем .mnd для каждого
-                for p in procs:
-                    fname = f"{base_name}_proc{p.index}.mnd"
-                    fpath = os.path.join(folder, fname)
-                    with open(fpath, "w", encoding="utf-8") as f:
+                    fname_mnd = f"{base_name}_proc{p.index}.mnd"
+                    with open(os.path.join(folder, fname_mnd), "w", encoding="utf-8") as f:
                         f.write(p.mindcode)
+
+                fname_comb_mlog = f"{base_name}_combined.mlog"
+                with open(os.path.join(folder, fname_comb_mlog), "w", encoding="utf-8") as f:
+                    f.write(self.current_result.mlog)
+                saved.append(fname_comb_mlog)
+
+                fname_comb_mnd = f"{base_name}_combined.mnd"
+                with open(os.path.join(folder, fname_comb_mnd), "w", encoding="utf-8") as f:
+                    f.write(self.current_result.mindcode)
+                saved.append(fname_comb_mnd)
 
                 messagebox.showinfo(
                     "Готово",
-                    f"Сохранено {len(procs)} файлов .mlog и .mnd в папку:\n{folder}\n\n"
-                    + "\n".join(saved) +
-                    f"\n\n⚠️ Загружайте файлы в процессоры в порядке нумерации!\n"
-                    f"Запускайте все {len(procs)} процессора одновременно."
+                    f"Сохранено {len(saved)} файлов в папку:\n{folder}\n\n"
+                    + "\n".join(f"• {s}" for s in saved)
+                    + f"\n\n⚠️ Загружайте файлы proc1, proc2, ... в {len(procs)} процессоров в порядке нумерации!\n"
+                    f"Все процессоры должны быть привязаны к дисплею '{self.entry_target.get().strip() or 'display1'}'.",
                 )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Схема (.msch)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _build_schematic_result(self):
+        """Собирает схему из текущего результата. Возвращает SchematicResult или None."""
+        if not self.current_result:
+            messagebox.showinfo("Подсказка", "Сначала выберите изображение!")
+            return None
+        try:
+            from schematic_builder import PYMSCH_AVAILABLE, build_schematic
+            if not PYMSCH_AVAILABLE:
+                messagebox.showerror(
+                    "Нет pymsch",
+                    "Библиотека pymsch не установлена.\n"
+                    "Запустите: pip install pymsch\n\n"
+                    "После установки перезапустите программу.",
+                )
+                return None
+            name = ""
+            if self.current_image_path:
+                name = os.path.splitext(os.path.basename(self.current_image_path))[0]
+            target = self.entry_target.get().strip() or "display1"
+            return build_schematic(
+                self.current_result,
+                display_key=self.display_mode,
+                display_name=target,
+                schematic_name=name or "Mindcode Image Display",
+            )
+        except Exception as e:  # noqa: BLE001
+            messagebox.showerror("Ошибка сборки схемы", str(e))
+            return None
+
+    def _on_copy_schematic(self):
+        """Копирует схему в буфер обмена для импорта через Mindustry."""
+        sr = self._build_schematic_result()
+        if sr is None:
+            return
+        from schematic_builder import copy_schematic_to_clipboard
+        if copy_schematic_to_clipboard(sr):
+            messagebox.showinfo(
+                "📦 Схема скопирована!",
+                f"Схема ({sr.block_count} блоков: 1 дисплей + {sr.processor_count} процессоров)\n"
+                f"скопирована в буфер обмена!\n\n"
+                f"Как импортировать в Mindustry:\n"
+                f"1. Откройте Mindustry → Core → Схемы\n"
+                f"2. Нажмите «Импорт» → «Вставить из буфера обмена»\n"
+                f"3. Схема появится в библиотеке → разместите её на карте\n"
+                f"4. Дисплей и {sr.processor_count} процессора уже содержат готовый код!\n\n"
+                f"Размер схемы: {sr.layout_width}×{sr.layout_height} тайлов",
+            )
+        else:
+            messagebox.showerror("Ошибка", "Не удалось скопировать схему в буфер обмена.")
+
+    def _on_save_schematic(self):
+        """Сохраняет схему в .msch файл."""
+        sr = self._build_schematic_result()
+        if sr is None:
+            return
+        base_name = "image_display"
+        if self.current_image_path:
+            base_name = os.path.splitext(os.path.basename(self.current_image_path))[0]
+        path = filedialog.asksaveasfilename(
+            title="Сохранить схему Mindustry",
+            initialfile=f"{base_name}.msch",
+            filetypes=[
+                ("Mindustry Schematic (*.msch)", "*.msch"),
+                ("Все файлы", "*.*"),
+            ],
+        )
+        if path:
+            from schematic_builder import save_schematic_file
+            save_schematic_file(sr, path)
+            messagebox.showinfo(
+                "Схема сохранена",
+                f"Файл сохранен:\n{path}\n\n"
+                f"Схема: 1 дисплей + {sr.processor_count} процессоров "
+                f"({sr.layout_width}×{sr.layout_height} тайлов)\n\n"
+                f"Как импортировать:\n"
+                f"Mindustry → Core → Схемы → Импорт → выбрать файл .msch",
+            )
 
 
 def main():
