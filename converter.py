@@ -230,6 +230,7 @@ class CodeCompiler:
         sync_delay: float = 0.25,
         stop_at_end: bool = True,
         instruction_limit: int | None = 1000,
+        watchdog: bool = True,
     ) -> list[ProcessorCode]:
         """
         Нарезает отрисовку прямоугольников на несколько процессоров так,
@@ -238,7 +239,9 @@ class CodeCompiler:
         Особенности мульти-процессорной графики:
           - Процессор 1 выполняет draw clear (очистку фона).
           - Процессоры 2..N не очищают экран, а делают wait(delay) для безопасной рассинхронизации.
-          - Каждый процессор гарантированно завершается drawflush и stop (предотвращает зацикливание).
+          - При watchdog=True процессоры не засыпают намертво (stop), а переходят в сторожевой
+            цикл ожидания: если при перезаходе в игру или перестройке дисплей обнулился
+            (cur_ops < my_ops), отрисовка перезапускается автоматически.
           - Каждый процессор самостоятельно выставляет цвет перед рисованием своих прямоугольников.
           - Цвет перевыставляется после каждого промежуточного drawflush: цвет —
             глобальное состояние дисплея, и пачки от разных процессоров чередуются.
@@ -304,7 +307,21 @@ class CodeCompiler:
                 cur_lines += 1
                 cur_buffer = 0
 
-            if stop_at_end:
+            if watchdog:
+                cur_mc.append("\n// Ожидание сброса дисплея (при перезаходе в игру или перестройке экрана)")
+                cur_mc.append(f"var my_ops = {display_name}.@operations;")
+                cur_mc.append(f"while {display_name}.@operations >= my_ops do")
+                cur_mc.append("    wait(1);")
+                cur_mc.append("end;")
+
+                loop_line = cur_lines + 1
+                cur_mlog.append(f"sensor __my_ops {display_name} @operations")
+                cur_mlog.append("wait 1")
+                cur_mlog.append(f"sensor __cur_ops {display_name} @operations")
+                cur_mlog.append("jump 0 lessThan __cur_ops __my_ops")
+                cur_mlog.append(f"jump {loop_line} always x false")
+                cur_lines += 5
+            elif stop_at_end:
                 cur_mc.append("// Остановка процессора")
                 # stopProcessor() компилируется в mlog-инструкцию stop,
                 # тогда как stop() в Mindcode означает ucontrol stop (остановку юнита)
@@ -337,7 +354,8 @@ class CodeCompiler:
                         # drawflush + повторный draw color в начале следующей пачки
                         needed_lines += 2
 
-                    closing_lines = (1 if (cur_buffer + needed_lines) > 0 else 0) + (1 if stop_at_end else 0)
+                    closing_watchdog_lines = 5 if watchdog else (1 if stop_at_end else 0)
+                    closing_lines = (1 if (cur_buffer + needed_lines) > 0 else 0) + closing_watchdog_lines
 
                     if cur_lines + needed_lines + closing_lines <= max_lines_per_proc:
                         break
@@ -385,6 +403,7 @@ class CodeCompiler:
         split_processors: bool = True,
         max_lines_per_proc: int = 950,
         sync_delay: float = 0.25,
+        watchdog: bool = True,
     ) -> tuple[str, str, int, list[ProcessorCode]]:
         """
         Генерирует исходники Mindcode и MLOG с поддержкой разделения по процессорам.
@@ -400,6 +419,7 @@ class CodeCompiler:
                 sync_delay=sync_delay,
                 stop_at_end=stop_at_end,
                 instruction_limit=instruction_limit,
+                watchdog=watchdog,
             )
 
             if len(processors) == 1:
@@ -476,7 +496,21 @@ class CodeCompiler:
             mlog.append(f"drawflush {display_name}")
             instruction_count += 1
 
-        if stop_at_end:
+        if watchdog:
+            mc.append("\n// Ожидание сброса дисплея (при перезаходе в игру или перестройке экрана)")
+            mc.append(f"var my_ops = {display_name}.@operations;")
+            mc.append(f"while {display_name}.@operations >= my_ops do")
+            mc.append("    wait(1);")
+            mc.append("end;")
+
+            loop_line = instruction_count + 1
+            mlog.append(f"sensor __my_ops {display_name} @operations")
+            mlog.append("wait 1")
+            mlog.append(f"sensor __cur_ops {display_name} @operations")
+            mlog.append("jump 0 lessThan __cur_ops __my_ops")
+            mlog.append(f"jump {loop_line} always x false")
+            instruction_count += 5
+        elif stop_at_end:
             mc.append("\n// Остановка процессора для предотвращения мерцания")
             # stopProcessor() компилируется в mlog-инструкцию stop,
             # тогда как stop() в Mindcode означает ucontrol stop (остановку юнита)
@@ -514,6 +548,7 @@ class ConverterService:
         split_processors: bool = True,
         max_lines_per_proc: int = 950,
         sync_delay: float = 0.25,
+        watchdog: bool = True,
     ) -> ConversionResult:
         disp = DISPLAYS.get(display_key, DISPLAYS["small"])
         
@@ -547,6 +582,7 @@ class ConverterService:
             split_processors=split_processors,
             max_lines_per_proc=max_lines_per_proc,
             sync_delay=sync_delay,
+            watchdog=watchdog,
         )
 
         preview = cls.render_preview(disp.width, disp.height, bg_rgb, rectangles)
@@ -576,6 +612,7 @@ class ConverterService:
         max_instructions: int = 950,
         aspect_mode: str = "fit",
         display_name: str = "display1",
+        watchdog: bool = True,
     ) -> ConversionResult:
         """Подбирает сетку и палитру так, чтобы ОДИН процессор уложился в max_instructions."""
         disp = DISPLAYS.get(display_key, DISPLAYS["small"])
@@ -606,6 +643,7 @@ class ConverterService:
                     # Авто-подгон всегда подбирает параметры под один процессор,
                     # поэтому сравниваем именно однопроцессорный размер кода.
                     split_processors=False,
+                    watchdog=watchdog,
                 )
                 if res.estimated_instructions <= max_instructions:
                     return res
@@ -621,6 +659,7 @@ class ConverterService:
             display_name=display_name,
             instruction_limit=1000,
             split_processors=False,
+            watchdog=watchdog,
         )
 
     @staticmethod

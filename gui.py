@@ -287,6 +287,21 @@ class AppGUI(tk.Tk):
         self.entry_target.insert(0, "display1")
         self.entry_target.pack(side=tk.RIGHT)
 
+        self.watchdog_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            card_mind,
+            text="Авто-восстановление (Watchdog)",
+            variable=self.watchdog_var,
+            bg=C_BG_CARD,
+            fg=C_TEXT_PRIMARY,
+            selectcolor=C_BG_INPUT,
+            activebackground=C_BG_CARD,
+            activeforeground=C_TEXT_PRIMARY,
+            highlightthickness=0,
+            font=("Segoe UI", 9),
+            command=self._on_watchdog_toggle,
+        ).pack(anchor="w", pady=(6, 2))
+
         # ── Карточка: Графика и сжатие ───────────────────────────────────────
         card_gfx = self._create_card(parent, "ГРАФИКА И СЖАТИЕ")
 
@@ -907,6 +922,9 @@ class AppGUI(tk.Tk):
         self.dither = self.dither_var.get()
         self._run_conversion()
 
+    def _on_watchdog_toggle(self):
+        self._run_conversion()
+
     def _on_select_file(self):
         filetypes = [
             ("Все поддерживаемые изображения", "*.png;*.jpg;*.jpeg;*.bmp;*.webp;*.gif"),
@@ -949,6 +967,8 @@ class AppGUI(tk.Tk):
             split_processors = False
             instruction_limit = 1000
 
+        watchdog = self.watchdog_var.get()
+
         try:
             res = ConverterService.convert(
                 image_path=self.current_image_path,
@@ -960,6 +980,7 @@ class AppGUI(tk.Tk):
                 instruction_limit=instruction_limit,
                 stop_at_end=True,
                 split_processors=split_processors,
+                watchdog=watchdog,
             )
             self.current_result = res
             self.selected_proc_idx = 0
@@ -973,6 +994,7 @@ class AppGUI(tk.Tk):
             return
 
         target_name = self.entry_target.get().strip() or "display1"
+        watchdog = self.watchdog_var.get()
 
         try:
             res = ConverterService.auto_fit_to_budget(
@@ -981,6 +1003,7 @@ class AppGUI(tk.Tk):
                 max_instructions=950,
                 aspect_mode=self.aspect_mode,
                 display_name=target_name,
+                watchdog=watchdog,
             )
             self.current_result = res
             self.selected_proc_idx = 0
